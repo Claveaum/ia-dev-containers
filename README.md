@@ -1,125 +1,157 @@
 # IA Dev Containers
 > **Environnements de développement sécurisés pour clients IA CLI**
 
-Ce projet fournit des **conteneurs Podman/Docker sécurisés** pour développer avec des clients IA CLI (Mistral Vibe, GitHub Copilot, etc.) **sans compromettre la sécurité de votre poste de travail**.
+Ce projet fournit des **conteneurs Podman sécurisés** pour développer avec des clients IA CLI (Mistral Vibe, GitHub Copilot, etc.) **sans compromettre la sécurité de votre poste de travail**.
 
 ---
 
-## 🎯 **Objectifs Principaux**
+## 🎯 **Objectifs principaux**
 
-- ✅ **Isolation totale** : Les clients IA ne peuvent **pas accéder** à votre système hôte
-- ✅ **Accès réseau contrôlé** : Seules les URLs **nécessaires au développement** sont autorisées
-- ✅ **Installation de dépendances sécurisée** : `pip install --user`, `npm install --prefix` sans `sudo`
-- ✅ **Protection contre l'exfiltration** : Impossible d'envoyer des données à des serveurs non autorisés
-- ✅ **Compatibilité multi-OS** : Linux, macOS, Windows (via Podman)
-- ✅ **Intégration VS Code** : Utilisable comme Dev Container
+- ✅ **Isolation totale** : le CLI IA ne peut **pas accéder** à votre système hôte
+- ✅ **Accès réseau contrôlé** : seuls les domaines **nécessaires au développement** sont autorisés
+- ✅ **Installation de dépendances sécurisée** : `pip install --user`, `npm install --prefix`, sans `sudo`
+- ✅ **Protection contre l'exfiltration** : le CLI ne peut pas envoyer de données vers des serveurs non autorisés
+- ✅ **Intégration VS Code** : utilisable comme Dev Container
 
 ---
 
-## 📁 **Structure du Projet**
+## 🏗️ **Architecture : deux conteneurs (gateway + workspace)**
+
+Le sandbox repose sur **deux conteneurs séparés**, jamais un seul :
+
+- **`gateway`** : le seul conteneur avec un accès réseau réel. Fait tourner Squid, applique l'allowlist de domaines. Ne contient jamais de code du CLI IA.
+- **`workspace`** : exécute le CLI IA (non fiable par hypothèse). Attaché **uniquement** à un réseau Podman `--internal`, qui n'a **aucune route par défaut vers l'extérieur** — c'est ça, et rien d'autre, qui garantit qu'il ne peut rien joindre en direct.
+
+```
+                  réseau "podman" (uplink réel)
+                          │
+                    ┌─────▼─────┐
+                    │  gateway  │  Squid + allowlist de domaines
+                    └─────┬─────┘
+                          │ réseau "ia-gw-internal" (--internal, sans route sortante)
+                    ┌─────▼─────┐
+                    │ workspace │  CLI IA, cap-drop=ALL, read-only, non-root
+                    └───────────┘
+```
+
+**Pourquoi cette séparation ?** Un seul conteneur ne peut pas offrir à la fois un vrai accès réseau pour le proxy *et* une garantie noyau que le workload ne peut pas le contourner (`--network=none` empêche les deux à la fois ; sans lui, `HTTP_PROXY` n'est qu'une convention qu'un process hostile peut ignorer). Séparer les deux rôles dans deux conteneurs résout ce dilemme : le `workspace` n'a physiquement aucune interface vers l'extérieur, quel que soit le comportement du CLI IA qu'il exécute.
+
+Cette architecture est **construite et testée réellement** (Podman 5.8.3, réseau `--internal`, résolution DNS entre conteneurs via aardvark-dns) — pas seulement documentée sur le papier. Deux niveaux sont disponibles pour le gateway :
+
+- **Phase simple** (`GATEWAY_HARDENED=0`, par défaut) : le gateway tourne directement en utilisateur `nobody`, sans capacité particulière.
+- **Phase durcie** (`GATEWAY_HARDENED=1`) : le gateway démarre root-in-userns, charge des règles **nftables** verrouillant sa propre sortie (ports 80/443 uniquement, blocage des plages RFC1918 et de l'IP de métadonnées cloud `169.254.169.254`), vérifie que `net.ipv4.ip_forward=0`, puis abandonne définitivement ses privilèges vers `nobody` avant de lancer Squid.
+
+---
+
+## 📁 **Structure du projet**
 
 ```bash
 ia-dev-containers/
-├── base/                          # 📦 Image de base commune
-│   ├── Dockerfile                # Alpine 3.20 + outils de base
-│   └── config/
-│       └── proxy/
-│           └── squid.conf         # Configuration Squid optimisée
+├── gateway-base/                  # 📦 Image générique du gateway (Squid, nftables)
+│   ├── Dockerfile
+│   ├── config/squid.conf          # ACL génériques, pas d'allowlist en dur
+│   └── scripts/{entrypoint.sh, gateway.nft}
 │
-├── clients/                      # 🎯 Solutions par client IA
-│   ├── mistral-vibe/              # Solution pour Mistral Vibe CLI
-│   │   ├── Dockerfile
-│   │   ├── config/
-│   │   │   ├── allowed-urls.txt   # URLs autorisées pour Mistral Vibe
-│   │   │   └── podman-args.sh     # Arguments Podman
-│   │   ├── scripts/
-│   │   │   └── run.sh             # Script de lancement
-│   │   ├── .devcontainer/
-│   │   │   └── devcontainer.json # Configuration VS Code
-│   │   └── README.md
-│   │
-│   └── copilot/                   # Solution pour GitHub Copilot CLI
-│       ├── Dockerfile
-│       ├── config/
-│       │   ├── allowed-urls.txt
-│       │   └── podman-args.sh
+├── workspace-base/                # 📦 Image générique du workspace (CLI IA)
+│   ├── Dockerfile
+│   └── scripts/entrypoint.sh
+│
+├── clients/                       # 🎯 Solutions par client IA
+│   └── mistral-vibe/              # Solution pour Mistral Vibe CLI
+│       ├── gateway/               # Overlay : allowlist de domaines spécifique
+│       │   ├── Dockerfile
+│       │   ├── config/allowed-urls.txt
+│       │   └── scripts/gateway-checks.sh
+│       ├── workspace/             # Overlay : Python 3 + pip
+│       │   └── Dockerfile
 │       ├── scripts/
-│       │   └── run.sh
+│       │   ├── lib.sh             # Constantes partagées (réseau, images, noms)
+│       │   ├── run.sh             # Orchestration : up|shell|test|down
+│       │   └── security-tests.sh  # Suite de vérification (exécutée dans le workspace)
 │       ├── .devcontainer/
-│       │   └── devcontainer.json
+│       │   └── devcontainer.json  # Configuration VS Code (workspace uniquement)
+│       ├── .env.example           # Modèle pour les secrets (MISTRAL_API_KEY, ...)
 │       └── README.md
 │
-└── scripts/                       # 🔧 Scripts communs à tous les conteneurs
-    ├── entrypoint.sh              # Orchestrateur principal
-    ├── setup-proxy.sh             # Démarrage du proxy Squid
-    └── security-tests.sh          # Tests de sécurité adaptatifs
+└── .gitignore                     # Ignore les .env réels
 ```
+
+`clients/copilot/` n'existe pas encore ; `gateway-base/` et `workspace-base/` sont conçus pour être réutilisés tels quels par un futur client Copilot.
 
 ---
 
-## 🚀 **Utilisation Rapide**
-
-### Pour **Mistral Vibe CLI** (déjà généré)
+## 🚀 **Utilisation rapide (Mistral Vibe CLI)**
 
 ```bash
-# Naviguer vers le conteneur Mistral Vibe
 cd ia-dev-containers/clients/mistral-vibe
 
-# Construire et lancer avec le script
-./scripts/run.sh
+# Construit les images, crée le réseau interne, démarre le gateway
+./scripts/run.sh up
 
-# Ou manuellement
-podman build -t ia-dev-container-mistral-vibe .
-source config/podman-args.sh
-podman run $PODMAN_ARGS -it ia-dev-container-mistral-vibe
+# Lance un shell interactif dans le workspace
+./scripts/run.sh shell
+
+# Lance la suite de tests de sécurité
+./scripts/run.sh test
+
+# Arrête tout (ajoutez --purge-network pour aussi supprimer le réseau)
+./scripts/run.sh down
 ```
 
-Une fois dans le conteneur :
+Une fois dans le workspace :
 ```bash
-# Installer Mistral Vibe
 pip install --user mistral-vibe
+mistral-vibe
+```
 
-# Vérifier la sécurité
-/security-tests.sh
+Pour activer le durcissement du gateway (nftables + abandon de privilèges) :
+```bash
+GATEWAY_HARDENED=1 ./scripts/run.sh up
 ```
 
 ---
 
-## 🔒 **Mesures de Sécurité Implémentées**
+## 🔒 **Mesures de sécurité implémentées**
 
-| **Catégorie** | **Mesure** | **Description** |
-|--------------|------------|-----------------|
-| **Isolation** | Utilisateur non-root | Conteneur tourne avec UID 1000 (pas de root) |
-| **Isolation** | Filesystem RO | Tout est en lecture seule sauf `/workspace` et répertoires de dépendances |
-| **Isolation** | Pas de capabilities | `--cap-drop=ALL` (toutes les capabilities Linux désactivées) |
-| **Isolation** | No new privileges | `no-new-privileges` empêche l'escalade |
-| **Réseau** | Isolation réseau | `--network=none` (pas d'accès direct à Internet) |
-| **Réseau** | Proxy filtrant | Squid filtre les URLs selon `allowed-urls.txt` |
-| **Réseau** | Proxy non-root | Squid tourne en tant que `nobody` (pas root) |
-| **Sécurité** | Installation utilisateur | `pip install --user` et `npm install --prefix` sans sudo |
-| **Audit** | Tests automatiques | `/security-tests.sh` valide la configuration |
+| **Catégorie** | **Mesure** | **Où** |
+|--------------|------------|--------|
+| **Isolation réseau** | Aucune route par défaut vers l'extérieur | `workspace`, réseau `--internal` |
+| **Isolation réseau** | Seul point d'accès réel à internet | `gateway` (double-attaché) |
+| **Filtrage** | Allowlist de domaines | Squid ACL `dstdomain`, dans `gateway` |
+| **Défense en profondeur** | Verrouillage de l'egress du gateway lui-même | nftables (`GATEWAY_HARDENED=1`) |
+| **Défense en profondeur** | Le gateway ne peut jamais router entre ses deux interfaces | chaîne `forward` nftables vide, `ip_forward=0` vérifié au démarrage |
+| **Isolation utilisateur** | Non-root partout | `workspace` (UID 1000), `gateway` (nobody) |
+| **Isolation utilisateur** | Abandon définitif des privilèges | `gateway` : `su-exec nobody` après chargement des règles réseau |
+| **Isolation filesystem** | Lecture seule | `--read-only` + tmpfs sur les deux conteneurs |
+| **Capacités** | `--cap-drop=ALL` sur les deux conteneurs | capacités ajoutées seulement temporairement sur le gateway durci |
+| **Installation de dépendances** | `pip install --user` sans sudo | `workspace` |
+| **Secrets** | `--env-file .env` (jamais `-e CLE=valeur`) | voir `.env.example` |
+| **Audit** | Tests automatiques exécutés contre le vrai gateway | `run.sh test` / `security-tests.sh` |
 
 ---
 
-## 🌐 **URLs Autorisées par Défaut**
+## 🌐 **URLs autorisées par défaut (Mistral Vibe)**
 
-### Pour Mistral Vibe CLI
 - **Mistral AI** : `api.mistral.ai`, `mistral.ai`
-- **GitHub** : `github.com`, `api.github.com`, `raw.githubusercontent.com`
+- **GitHub** : `github.com`, `api.github.com`, `raw.githubusercontent.com`, `camo.githubusercontent.com`, `user-images.githubusercontent.com`
 - **PyPI** : `pypi.org`, `pypi.python.org`, `files.pythonhosted.org`
-- **Hugging Face** : `huggingface.co`, `api.huggingface.co`
+- **Hugging Face** : `huggingface.co`, `api.huggingface.co`, `cdn.huggingface.co`
 - **CDN** : `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`
 
-> ⚠️ **Pour ajouter une URL** : Modifiez `clients/mistral-vibe/config/allowed-urls.txt` et reconstruisez l'image.
+> ⚠️ **Pour ajouter un domaine** : modifiez `clients/mistral-vibe/gateway/config/allowed-urls.txt` puis relancez `./scripts/run.sh down && ./scripts/run.sh up`.
+
+> ⚠️ **Limite connue** : l'allowlist par domaine *réduit* le risque d'exfiltration, elle ne l'élimine pas. Des domaines autorisés comme `github.com` ou `huggingface.co` exposent des surfaces en écriture (gists, issues, upload de modèles) qui restent un vecteur résiduel.
+
+> ⚠️ **Contrainte assumée** : seuls les remotes git en **HTTPS** fonctionnent. Le SSH (port 22) n'est pas relayé par le gateway.
 
 ---
 
-## 📋 **Comparatif des Solutions**
+## 📋 **Comparatif des solutions**
 
-| **Client** | **Langage** | **Gestionnaire** | **Taille** | **Volumes** | **Statut** |
-|-----------|-------------|----------------|-----------|-------------|-----------|
-| Mistral Vibe | Python 3.11 | pip | ~200 Mo | `.local`, `.cache` | ✅ **Généré** |
-| GitHub Copilot | Node.js 18 | npm | ~250 Mo | `.npm-global`, `.npm`, `.cache` | ⏳ À générer |
+| **Client** | **Langage** | **Statut** |
+|-----------|-------------|-----------|
+| Mistral Vibe | Python 3 | ✅ **Généré et testé** (Phase simple + durcie) |
+| GitHub Copilot | Node.js | ⏳ À générer |
 
 ---
 
@@ -127,125 +159,48 @@ pip install --user mistral-vibe
 
 ### Ajouter un nouveau client IA
 
-1. Créer un dossier sous `clients/<nom-du-client>/`
-2. Créer un `Dockerfile` basé sur `ia-dev-containers-base`
-3. Définir `config/allowed-urls.txt` avec les URLs nécessaires
-4. Créer un `devcontainer.json` pour VS Code (optionnel)
-5. Ajouter un script `run.sh` (optionnel)
-
-Exemple de `Dockerfile` pour un nouveau client :
-```dockerfile
-FROM ia-dev-containers-base:latest
-
-# Installer les dépendances spécifiques
-RUN apk add --no-cache <package1> <package2>
-
-# Configurer l'environnement
-ENV IA_CLIENT=<nom-du-client>
-
-# Copier la configuration des URLs
-COPY config/allowed-urls.txt /etc/squid/allowed-urls.txt
-RUN chown squid:squid /etc/squid/allowed-urls.txt && \
-    chmod 640 /etc/squid/allowed-urls.txt
-```
+1. Créer `clients/<nom-du-client>/gateway/` avec un `Dockerfile` (`FROM ia-dev-containers-gateway-base:latest`) + `config/allowed-urls.txt`.
+2. Créer `clients/<nom-du-client>/workspace/` avec un `Dockerfile` (`FROM ia-dev-containers-workspace-base:latest`), qui doit se terminer par `USER devuser` (tout ce qui précède, comme `apk add`, a besoin de root).
+3. Copier et adapter `clients/mistral-vibe/scripts/{lib.sh,run.sh,security-tests.sh}`.
+4. `./scripts/run.sh up` pour construire et valider.
 
 ---
 
 ## 🔧 **Dépannage**
 
-### Le conteneur ne démarre pas
-1. Vérifiez les logs :
-   ```bash
-   podman logs <container-name>
-   ```
-2. Testez en mode interactif :
-   ```bash
-   podman run --rm -it <image-name> bash
-   ```
-3. Vérifiez Podman :
-   ```bash
-   podman --version
-   podman info
-   ```
+### Le workspace ne démarre pas / le réseau n'existe pas
+Le workspace ne peut s'attacher qu'à un réseau `ia-gw-internal` déjà créé. Lancez toujours `./scripts/run.sh up` (qui crée le réseau et démarre le gateway) avant `./scripts/run.sh shell`.
 
-### Le proxy ne fonctionne pas
-1. Vérifiez que Squid tourne :
-   ```bash
-   ps aux | grep squid
-   ```
-2. Testez le proxy manuellement :
-   ```bash
-   curl -x http://localhost:3128 https://github.com
-   ```
-3. Vérifiez les logs Squid :
-   ```bash
-   tail -f /var/log/squid/access.log
-   ```
+### Le gateway ne répond pas
+```bash
+podman logs mistral-vibe-gateway
+podman exec mistral-vibe-gateway /gateway-checks.sh   # utilisateur squid, ip_forward, capacités
+```
 
-### Impossible d'installer des paquets
-1. Vérifiez que `~/.local` est accessible :
-   ```bash
-   touch ~/.local/test && rm ~/.local/test
-   ```
-2. Vérifiez que le proxy est configuré :
-   ```bash
-   echo $HTTP_PROXY
-   echo $HTTPS_PROXY
-   ```
-3. Testez l'accès à PyPI :
-   ```bash
-   curl -x http://localhost:3128 https://pypi.org
-   ```
+### Un domaine nécessaire est bloqué
+Ajoutez-le à `clients/mistral-vibe/gateway/config/allowed-urls.txt`, puis reconstruisez (`./scripts/run.sh down && ./scripts/run.sh up`).
+
+### Vérifier le proxy manuellement
+```bash
+./scripts/run.sh shell -- curl -x http://gateway:3128 https://github.com   # doit réussir
+./scripts/run.sh shell -- curl --noproxy '*' https://1.1.1.1               # doit échouer (network unreachable)
+```
 
 ---
 
-## 📊 **Score de Sécurité**
+## 🎓 **Bonnes pratiques**
 
-| **Critère** | **Score** | **Détails** |
-|------------|-----------|-------------|
-| Isolation utilisateur | ⭐⭐⭐⭐⭐ | Non-root + no-new-privileges |
-| Isolation filesystem | ⭐⭐⭐⭐⭐ | RO + volumes dédiés |
-| Isolation réseau | ⭐⭐⭐⭐⭐ | Proxy + iptables |
-| Proxy sécurisé | ⭐⭐⭐⭐ | Squid en nobody |
-| Installation dépendances | ⭐⭐⭐⭐ | Sans sudo |
-| **Total** | **⭐⭐⭐⭐⭐** | **98/100** |
-
-> ⚠️ **Les 2% manquants** : Utilisation de Squid (surface d'attaque). Pour atteindre 100%, remplacer par eBPF.
+1. **Secrets** : copiez `clients/mistral-vibe/.env.example` vers `.env` (ignoré par git), jamais de `-e CLE=valeur` sur la ligne de commande.
+2. **Mettez à jour régulièrement** les images de base (`podman build --no-cache`).
+3. **Ne contournez jamais le gateway** : c'est la seule protection contre l'exfiltration. Pour un nouveau besoin réseau, ajoutez le domaine à l'allowlist plutôt que de désactiver le filtrage.
+4. **Utilisez `GATEWAY_HARDENED=1`** dès que possible : la Phase durcie apporte une défense en profondeur (nftables) au cas où l'allowlist applicative serait un jour contournée.
 
 ---
 
-## 🎓 **Bonnes Pratiques**
+## 📚 **Documentation par client**
 
-1. **Ne stockez jamais de secrets dans le conteneur**
-   - Utilisez des variables d'environnement montées depuis l'hôte
-   - Ou un gestionnaire de secrets (Vault, AWS Secrets Manager, etc.)
-
-2. **Mettez à jour régulièrement**
-   ```bash
-   podman pull alpine:3.20
-   podman build --no-cache -t <image-name> .
-   ```
-
-3. **Ne désactivez pas le proxy**
-   - C'est la principale protection contre l'exfiltration de données
-   - Pour ajouter une URL, modifiez `allowed-urls.txt`
-
-4. **Utilisez des volumes pour la persistance**
-   - Les paquets installés (`~/.local`, `~/.npm-global`)
-   - Le cache (`~/.cache`)
-   - Votre code (`/workspace`)
-
-5. **Vérifiez la sécurité après toute modification**
-   ```bash
-   /security-tests.sh
-   ```
-
----
-
-## 📚 **Documentation par Client**
-
-- **[Mistral Vibe CLI](clients/mistral-vibe/README.md)** - Solution complète générée
-- GitHub Copilot CLI - À générer avec l'option C
+- **[Mistral Vibe CLI](clients/mistral-vibe/README.md)** — solution complète, testée
+- GitHub Copilot CLI — à générer
 
 ---
 
@@ -253,9 +208,8 @@ RUN chown squid:squid /etc/squid/allowed-urls.txt && \
 
 1. Forker le projet
 2. Créer une branche (`git checkout -b feature/ma-fonctionnalité`)
-3. Committer vos changements (`git commit -m 'Ajout de ma fonctionnalité'`)
-4. Pusher vers la branche (`git push origin feature/ma-fonctionnalité`)
-5. Ouvrir une Pull Request
+3. Committer vos changements
+4. Ouvrir une Pull Request
 
 ---
 
@@ -267,25 +221,7 @@ MIT - Libre d'utiliser, modifier et distribuer.
 
 ## 📧 **Support**
 
-Pour des questions ou des problèmes :
 1. Consultez les READMEs spécifiques à chaque client
-2. Vérifiez les logs du conteneur (`podman logs`)
-3. Exécutez les tests de sécurité (`/security-tests.sh`)
+2. Vérifiez les logs (`podman logs mistral-vibe-gateway`, `podman logs mistral-vibe-workspace`)
+3. Exécutez `./scripts/run.sh test`
 4. Ouvrez une issue dans le dépôt
-
----
-
-## 🚀 **Prochaines Étapes**
-
-Vous avez actuellement la solution pour **Mistral Vibe CLI**. Pour compléter le projet :
-
-1. **Générer la solution Copilot** (Option C)
-2. **Tester les deux solutions**
-3. **Personnaliser les URLs autorisées** selon vos besoins
-4. **Intégrer avec votre workflow de développement**
-
-**Commande pour générer Copilot :**
-```bash
-# Demandez-moi de générer l'option C
-"C"
-```

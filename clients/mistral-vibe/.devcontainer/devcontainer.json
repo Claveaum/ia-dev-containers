@@ -1,24 +1,28 @@
 {
-  "name": "Mistral Vibe CLI Dev Container",
-  "dockerHost": "unix:///run/user/${uid}/podman/podman.sock",
+  // ⚠️ PRÉREQUIS OBLIGATOIRE : ce devcontainer ne construit/lance que le
+  // conteneur "workspace". Le conteneur "gateway" (proxy Squid, filtrage
+  // réseau) et le réseau interne partagé doivent déjà exister AVANT
+  // d'ouvrir ce dossier dans VS Code :
+  //
+  //   cd clients/mistral-vibe && ./scripts/run.sh up
+  //
+  // Si le réseau "ia-gw-internal" n'existe pas encore, la création du
+  // conteneur échouera (runArgs y fait référence ci-dessous).
+  "name": "Mistral Vibe CLI - Workspace (sandbox à deux conteneurs)",
   "containerUser": "devuser",
   "remoteUser": "devuser",
-  
+
   "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "USERNAME": "devuser",
-      "USER_UID": "${uid}",
-      "USER_GID": "${gid}"
-    },
-    "context": "../../.."
+    // Chemins relatifs à ce fichier devcontainer.json (spec devcontainers).
+    "dockerfile": "../workspace/Dockerfile",
+    "context": ".."
   },
-  
+
   "mounts": [
     {
-      "source": "${localWorkspaceFolder}/../../../workspace",
+      "source": "mistral-vibe-workspace",
       "target": "/workspace",
-      "type": "bind"
+      "type": "volume"
     },
     {
       "source": "mistral-vibe-local",
@@ -31,26 +35,27 @@
       "type": "volume"
     }
   ],
-  
+
   "runArgs": [
     "--userns=keep-id",
     "--security-opt=no-new-privileges",
     "--cap-drop=ALL",
-    "--network=none",
     "--read-only",
     "--tmpfs=/tmp",
     "--tmpfs=/run",
-    "-e=HTTP_PROXY=http://localhost:3128",
-    "-e=HTTPS_PROXY=http://localhost:3128",
-    "-e=NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
-    "-e=IA_CLIENT=mistral-vibe",
-    "-e=MISTRAL_API_URL=https://api.mistral.ai"
+    // Réseau interne uniquement : pas de deuxième interface, donc pas de
+    // route directe vers l'extérieur. Doit exister avant l'ouverture
+    // (créé par `run.sh up`, voir la note en haut du fichier).
+    "--network=ia-gw-internal",
+    "-e=HTTP_PROXY=http://gateway:3128",
+    "-e=HTTPS_PROXY=http://gateway:3128",
+    "-e=IA_CLIENT=mistral-vibe"
   ],
-  
-  "postCreateCommand": "/setup-proxy.sh && echo '✅ Proxy démarré' && /security-tests.sh",
-  
-  "postStartCommand": "echo '🎉 Conteneur Mistral Vibe CLI prêt !' && echo '' && echo '   Proxy : http://localhost:3128' && echo '' && echo '   Pour installer Mistral Vibe :' && echo '   $ pip install --user mistral-vibe' && echo '' && echo '   Pour démarrer :' && echo '   $ mistral-vibe'",
-  
+
+  "postCreateCommand": "/security-tests.sh || echo '⚠️  Des tests ont échoué - vérifiez que ./scripts/run.sh up a bien été lancé AVANT d'\\''ouvrir ce dossier (le gateway doit déjà tourner sur ia-gw-internal).'",
+
+  "postStartCommand": "echo '🎉 Conteneur workspace Mistral Vibe CLI prêt !' && echo '' && echo '   Proxy (via gateway) : http://gateway:3128' && echo '' && echo '   Pour installer Mistral Vibe :' && echo '   $ pip install --user mistral-vibe' && echo '' && echo '   Seuls les remotes git en HTTPS fonctionnent (pas de SSH/port 22).'",
+
   "customizations": {
     "vscode": {
       "extensions": [
@@ -73,7 +78,7 @@
       }
     }
   },
-  
+
   "forwardPorts": [],
   "workspaceFolder": "/workspace",
   "shutdownAction": "stop"
