@@ -31,9 +31,11 @@ cd clients/mistral-vibe   # ou clients/copilot
 ./scripts/run.sh shell
 ```
 
-## Pourquoi les volumes nommés aident ici
+## `/workspace` est un bind-mount du projet réel — point d'attention macOS spécifique
 
-`/workspace`, `~/.local` (ou `~/.npm-global` pour Copilot) et `~/.cache` sont des **volumes Podman nommés**, jamais des bind-mounts d'un répertoire de l'hôte. Ce choix a été fait pour la compatibilité `--read-only`, mais il a un bénéfice direct sur macOS : le stockage de ces volumes vit à l'intérieur du disque de la VM `podman machine`, pas à travers une couche de partage de fichiers hôte↔VM (virtiofs/9p) où les décalages d'UID/GID entre l'utilisateur macOS et l'utilisateur à l'intérieur de la VM causent classiquement des problèmes de permissions. Rien à faire de spécial ici — c'est un acquis de l'architecture existante, pas une adaptation macOS.
+Ce projet copie `ia-dev-containers` à la racine du projet à sandboxer et monte cette racine directement dans `/workspace` (bind-mount, pas un volume Podman vide) : le CLI IA travaille sur les vrais fichiers. C'est le point le plus susceptible de révéler un écart macOS-spécifique, et **rien ici n'a été vérifié sur matériel réel** : un bind-mount hôte↔VM sur macOS traverse `virtiofs` (ou `9p` selon le provider), une couche de partage de fichiers où les décalages d'UID/GID entre l'utilisateur macOS (souvent UID 501) et l'utilisateur à l'intérieur de la VM sont une source connue de problèmes de permissions. `--userns=keep-id` (déjà utilisé) atténue ça sur Linux natif ; son comportement à travers virtiofs n'est pas documenté et fait partie de la check-list ci-dessous.
+
+`~/.local` (ou `~/.npm-global` pour Copilot) et `~/.cache` restent, eux, des **volumes Podman nommés** (jamais des bind-mounts) : leur stockage vit entièrement à l'intérieur du disque de la VM `podman machine`, sans traverser virtiofs/9p — ils ne sont pas concernés par ce risque.
 
 ## Compatibilité bash des scripts `run.sh`
 
@@ -52,9 +54,9 @@ Cette section décrit ce qu'il reste à vérifier — elle n'a pas pu être exé
    ./scripts/run.sh shell -- curl -x http://gateway:3128 https://facebook.com    # doit échouer (403)
    ```
 4. `./scripts/run.sh test` (suite complète) → doit passer.
-5. Répéter 2-4 avec `GATEWAY_HARDENED=1`, plus `podman exec mistral-vibe-gateway /gateway-checks.sh` (capacités vides, `ip_forward=0`, squid en `nobody` — mêmes assertions déjà prouvées sur Linux).
-6. Répéter toute la séquence pour `clients/copilot`, y compris les deux clients **simultanément** (comme déjà vérifié sur Linux).
-7. Vérifier que `$(id -u):$(id -g)` (UID macOS, ex. 501) donne des permissions saines dans `/workspace`, et qu'un fichier écrit y survit à un cycle `down`/`up` (persistance du volume nommé).
+5. Répéter 2-4 avec `GATEWAY_HARDENED=1`, plus `podman exec <nom-du-conteneur-gateway> /gateway-checks.sh` (nom exact via `podman ps` ou `run.sh doctor` ; capacités vides, `ip_forward=0`, squid en `nobody` — mêmes assertions déjà prouvées sur Linux).
+6. Répéter toute la séquence pour `clients/copilot`, y compris deux **projets différents simultanément** (comme déjà vérifié sur Linux — voir [Isolation entre projets](../README.md#-isolation-entre-projets)).
+7. **Point le plus susceptible de diverger de Linux** : vérifier que `$(id -u):$(id -g)` (UID macOS, ex. 501) donne des permissions saines en écriture/lecture dans `/workspace` à travers virtiofs/9p (bind-mount, pas un volume nommé — voir la section ci-dessus), qu'un fichier créé dans le conteneur est bien visible et possédé correctement côté macOS, et que `--security-opt=label=disable` (no-op attendu, macOS n'a pas SELinux) ne cause pas d'effet de bord inattendu.
 8. **"Fait" pour macOS** = tout ce qui précède passe avec la même sémantique pass/fail que Linux (200 / 403 / network unreachable), ou des écarts explicitement documentés qui restent sûrs.
 
 Une fois cette check-list validée, mettre à jour le [tableau Plateformes hôte](../README.md#️-plateformes-hôte) du README racine (✅ Testé au lieu de ⚠️ Expérimental).

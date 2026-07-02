@@ -27,6 +27,15 @@ ENV IA_CLIENT=copilot
 
 COPY --chmod=0755 scripts/security-tests.sh /security-tests.sh
 
+# Un volume Podman nommé fraîchement créé est vide au premier mount : sans
+# ces répertoires déjà présents dans l'image, npm (y compris en --dry-run)
+# échoue avec ENOENT sur .npm-global/lib avant même toute tentative
+# d'install (repéré via un volume scopé par projet réellement vide, jamais
+# vu avant car le volume partagé de dev avait déjà ces dossiers depuis un
+# ancien `npm install -g` réel).
+RUN mkdir -p /home/devuser/.npm-global/lib /home/devuser/.npm-global/bin \
+    && chown -R devuser:devuser /home/devuser/.npm-global
+
 VOLUME /home/devuser/.npm-global
 VOLUME /home/devuser/.cache
 

@@ -55,9 +55,17 @@ else
     pass "/ est en lecture seule"
 fi
 
-if touch /workspace/test-security 2>/dev/null; then
+# /workspace est un bind-mount du vrai projet hôte (pas un volume vide) :
+# un nom fixe risquerait de "toucher" (mtime) puis supprimer un fichier
+# préexistant du projet s'il portait ce nom. Nom unique au PID + vérif
+# d'inexistence avant écriture, pour ne jamais rm un fichier qu'on n'a pas
+# créé nous-mêmes.
+ws_test_file="/workspace/.ia-sandbox-write-test.$$"
+if [ -e "$ws_test_file" ]; then
+    warn "$ws_test_file existe déjà, test d'écriture ignoré (collision improbable)"
+elif touch "$ws_test_file" 2>/dev/null; then
     pass "/workspace est accessible en écriture"
-    rm -f /workspace/test-security
+    rm -f "$ws_test_file"
 else
     fail "Impossible d'écrire dans /workspace !"
 fi

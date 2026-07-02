@@ -10,6 +10,8 @@ Ce sandbox exécute Mistral Vibe CLI dans un conteneur **`workspace`** qui n'a *
 
 Voir le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour le détail de l'architecture et pourquoi elle est construite ainsi (un seul conteneur ne peut pas garantir les deux propriétés à la fois : accès réseau réel pour le proxy *et* impossibilité de le contourner).
 
+**Ce dossier `ia-dev-containers` est prévu pour être copié à la racine du projet à sandboxer** (`mon-projet/ia-dev-containers/`). `/workspace` dans le conteneur est alors un accès direct à la racine du projet (bind-mount), pas une copie ni un volume vide — le CLI IA travaille sur les vrais fichiers. Voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour les implications.
+
 ---
 
 ## 🚀 **Utilisation**
@@ -22,20 +24,24 @@ Voir le [README racine](../../README.md#️-architecture--deux-conteneurs-gatewa
 ### **Démarrage**
 
 ```bash
+# Depuis la racine de VOTRE projet (pas ce dépôt) :
+cp -r /chemin/vers/ia-dev-containers .
 cd ia-dev-containers/clients/mistral-vibe
 
-./scripts/run.sh up      # construit les images, crée le réseau, démarre le gateway
-./scripts/run.sh shell   # lance un shell interactif dans le workspace
+./scripts/run.sh up      # construit les images, crée le réseau dédié à ce projet, démarre le gateway
+./scripts/run.sh shell   # lance un shell interactif dans le workspace (= racine du projet)
 ```
 
 Sous-commandes disponibles :
 
 | Commande | Effet |
 |---|---|
-| `run.sh up` | build des images + création du réseau `ia-gw-internal` + démarrage du gateway |
+| `run.sh up` | build des images + création du réseau interne dédié à ce projet + démarrage du gateway |
 | `run.sh shell [-- CMD...]` | démarre (ou réutilise) le gateway, puis un workspace interactif (ou exécute `CMD`) |
 | `run.sh test` | démarre le workspace et exécute `security-tests.sh` |
 | `run.sh down [--purge-network]` | arrête les conteneurs (et supprime le réseau si demandé) |
+| `run.sh secrets` | affiche le statut des secrets attendus |
+| `run.sh doctor` | diagnostic plateforme hôte + projet/réseau détecté pour cette copie |
 
 Variables d'environnement :
 
@@ -43,6 +49,8 @@ Variables d'environnement :
 |---|---|---|
 | `GATEWAY_HARDENED` | `0` (défaut) / `1` | `1` active nftables + abandon de privilèges sur le gateway |
 | `GATEWAY_ADDR_MODE` | `dns` (défaut) / `static` | `static` utilise l'IP fixe du gateway au lieu de la résolution DNS `gateway` |
+| `IA_PROJECT_ROOT` | chemin | force la racine du projet (défaut : dossier parent de cette copie) |
+| `IA_PROJECT_NAME` | texte | force le nom utilisé pour scoper les ressources Podman (défaut : nom du dossier `IA_PROJECT_ROOT`) — utile si deux projets partagent le même nom de dossier |
 
 Exemple avec le gateway durci :
 ```bash
@@ -52,7 +60,7 @@ GATEWAY_HARDENED=1 ./scripts/run.sh test
 
 ### **Avec VS Code**
 
-1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (le devcontainer n'orchestre que le `workspace`, pas le `gateway` ni le réseau).
+1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (le devcontainer n'orchestre que le `workspace`, pas le `gateway` ni le réseau ; `run.sh up` génère aussi `devcontainer.json` à partir de `devcontainer.json.template` — ne l'éditez pas directement, il est régénéré à chaque `up`).
 2. Ouvrir `clients/mistral-vibe` dans VS Code, extension **Remote - Containers**, `F1` → *Reopen in Container*.
 
 > ℹ️ `devcontainer.json` n'utilise pas `--secret` (un `runArg` statique casserait le démarrage si le secret n'existe pas encore). Pour les secrets sous VS Code : créez le `podman secret` au préalable dans un terminal (il persiste indépendamment du conteneur), ou utilisez `.env`.
@@ -97,7 +105,7 @@ chmod 600 .env
 | Mesure | Composant | Détail |
 |---|---|---|
 | Aucune route directe vers l'extérieur | `workspace` | réseau Podman `--internal`, pas de route par défaut |
-| Seul point d'accès réseau réel | `gateway` | double-attaché (`ia-gw-internal` + `podman`) |
+| Seul point d'accès réseau réel | `gateway` | double-attaché (réseau interne dédié au projet + `podman`) |
 | Allowlist de domaines | `gateway` | ACL Squid `dstdomain`, voir `gateway/config/allowed-urls.txt` |
 | Verrouillage egress du gateway lui-même | `gateway` (`GATEWAY_HARDENED=1`) | nftables : ports 80/443 uniquement, blocage RFC1918 + métadonnées cloud |
 | Le gateway ne route jamais entre ses interfaces | `gateway` | chaîne `forward` nftables vide, `ip_forward=0` vérifié au démarrage |
@@ -105,6 +113,8 @@ chmod 600 .env
 | Abandon définitif des privilèges | `gateway` (`GATEWAY_HARDENED=1`) | `su-exec nobody` après chargement des règles réseau, capacités effectives = 0 |
 | Lecture seule | les deux conteneurs | `--read-only` + tmpfs |
 | `pip install --user` sans sudo | `workspace` | |
+| Isolation entre projets | réseau, conteneurs, images overlay, `~/.local` | scopés par projet, voir [README racine](../../README.md#-isolation-entre-projets) |
+| ⚠️ **Non couvert** | `/workspace` | bind-mount du projet réel, pas un volume vide — voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) |
 
 ### **URLs autorisées par défaut**
 
@@ -137,7 +147,8 @@ Plus les vérifications habituelles : non-root, sudo bloqué, filesystem en lect
 
 Vérifications côté gateway (utilisateur effectif de Squid, `ip_forward`, capacités) :
 ```bash
-podman exec mistral-vibe-gateway /gateway-checks.sh
+# Nom de conteneur scopé par projet : mistral-vibe-<projet>-gateway (voir `run.sh doctor`)
+podman exec $(podman ps --filter name=mistral-vibe- --filter name=-gateway --format '{{.Names}}') /gateway-checks.sh
 ```
 
 ---
@@ -173,10 +184,13 @@ Rootless par défaut, pas de daemon, compatible avec les images Docker.
 
 **Le conteneur ne démarre pas, que faire ?**
 ```bash
-podman logs mistral-vibe-gateway
-podman logs mistral-vibe-workspace
-podman network exists ia-gw-internal || ./scripts/run.sh up   # le réseau doit exister en premier
+./scripts/run.sh doctor   # affiche le projet détecté et le nom du réseau attendu
+podman ps -a --filter name=mistral-vibe-
+podman logs <nom-du-conteneur>
 ```
+
+**Puis-je sandboxer plusieurs projets en même temps ?**
+Oui — copiez `ia-dev-containers` à la racine de chaque projet, lancez `run.sh up` dans chacun. Réseau, conteneurs, images overlay et volume de paquets installés (`~/.local`) sont automatiquement scopés par projet (voir [Isolation entre projets](../../README.md#-isolation-entre-projets) dans le README racine) ; les images `*-base` et le cache pip (`~/.cache`) restent partagés.
 
 ---
 

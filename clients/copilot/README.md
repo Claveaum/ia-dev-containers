@@ -8,7 +8,9 @@
 
 Même architecture que [Mistral Vibe](../mistral-vibe/README.md) : un conteneur **`workspace`** sans route réseau directe, qui ne peut joindre qu'un conteneur **`gateway`** séparé appliquant une allowlist de domaines via Squid. Voir le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour le détail de l'architecture.
 
-Réseau interne dédié (`ia-gw-internal-copilot`, `10.89.1.0/24`) — distinct de celui de mistral-vibe (`10.89.0.0/24`) — pour que les deux clients puissent tourner simultanément sans conflit de subnet Podman.
+Réseau interne dédié, scopé par (client, projet) — distinct de celui de mistral-vibe, et distinct entre deux projets différents — pour que plusieurs clients et plusieurs projets puissent tourner simultanément sans conflit de subnet Podman (voir [Isolation entre projets](../../README.md#-isolation-entre-projets) dans le README racine).
+
+**Ce dossier `ia-dev-containers` est prévu pour être copié à la racine du projet à sandboxer** (`mon-projet/ia-dev-containers/`). `/workspace` dans le conteneur est alors un accès direct à la racine du projet (bind-mount), pas une copie ni un volume vide — le CLI IA travaille sur les vrais fichiers. Voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour les implications.
 
 ---
 
@@ -30,17 +32,19 @@ Ce client a été validé pour les mêmes propriétés mécaniques que mistral-v
 ### **Démarrage**
 
 ```bash
+# Depuis la racine de VOTRE projet (pas ce dépôt) :
+cp -r /chemin/vers/ia-dev-containers .
 cd ia-dev-containers/clients/copilot
 
-./scripts/run.sh up      # construit les images, crée le réseau, démarre le gateway
-./scripts/run.sh shell   # lance un shell interactif dans le workspace
+./scripts/run.sh up      # construit les images, crée le réseau dédié à ce projet, démarre le gateway
+./scripts/run.sh shell   # lance un shell interactif dans le workspace (= racine du projet)
 ```
 
-Mêmes sous-commandes et variables d'environnement que mistral-vibe (`up|shell|test|down`, `GATEWAY_HARDENED`, `GATEWAY_ADDR_MODE`) — voir le [README mistral-vibe](../mistral-vibe/README.md#-utilisation) pour le détail, identique ici.
+Mêmes sous-commandes et variables d'environnement que mistral-vibe (`up|shell|test|down|secrets|doctor`, `GATEWAY_HARDENED`, `GATEWAY_ADDR_MODE`, `IA_PROJECT_ROOT`, `IA_PROJECT_NAME`) — voir le [README mistral-vibe](../mistral-vibe/README.md#-utilisation) pour le détail, identique ici.
 
 ### **Avec VS Code**
 
-1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code.
+1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (génère aussi `devcontainer.json` à partir de `devcontainer.json.template` — ne l'éditez pas directement, il est régénéré à chaque `up`).
 2. Ouvrir `clients/copilot` dans VS Code, extension **Remote - Containers**, `F1` → *Reopen in Container*.
 
 > ℹ️ `devcontainer.json` n'utilise pas `--secret` (voir [note équivalente côté mistral-vibe](../mistral-vibe/README.md#avec-vs-code)) : créez le `podman secret` au préalable dans un terminal, ou utilisez `.env`.
@@ -106,7 +110,8 @@ Pour ajouter un domaine : éditer `gateway/config/allowed-urls.txt`, puis `./scr
 En plus des vérifications communes (non-root, sudo bloqué, lecture seule, Node/npm disponibles), ce test vérifie spécifiquement que `api.githubcopilot.com` passe par l'allowlist — un test discriminant pour le matching de sous-domaine Squid (`.githubcopilot.com` avec point de tête matche les sous-domaines, une entrée sans point ne matcherait que l'hôte exact).
 
 ```bash
-podman exec copilot-gateway /gateway-checks.sh
+# Nom de conteneur scopé par projet : copilot-<projet>-gateway (voir `run.sh doctor`)
+podman exec $(podman ps --filter name=copilot- --filter name=-gateway --format '{{.Names}}') /gateway-checks.sh
 ```
 
 ---

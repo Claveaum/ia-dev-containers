@@ -4,22 +4,34 @@ set -euo pipefail
 # =============================================================================
 # Mistral Vibe CLI - Orchestration du sandbox à deux conteneurs
 #
+# Ce dossier (ia-dev-containers) est prévu pour être copié à la racine du
+# projet à sandboxer (ex: mon-projet/ia-dev-containers/) : /workspace dans
+# le conteneur est un bind-mount de la racine du projet (PROJECT_ROOT, le
+# dossier parent de cette copie), pas un volume Podman vide — le CLI IA
+# travaille sur les vrais fichiers. Voir le README (section Sécurité) pour
+# les implications de ce choix.
+#
 # Usage :
 #   run.sh up                    construit les images, crée le réseau, lance le gateway
 #   run.sh shell [-- CMD...]     lance (ou réutilise) le gateway puis un workspace interactif
 #   run.sh test                  lance le workspace et exécute security-tests.sh
 #   run.sh down [--purge-network] arrête les conteneurs (et supprime le réseau)
 #   run.sh secrets                affiche le statut des secrets attendus (voir lib.sh: SECRETS)
-#   run.sh doctor                  diagnostic plateforme hôte / podman machine (macOS, Windows)
+#   run.sh doctor                  diagnostic plateforme hôte / réseau / projet détecté
 #
 # Variables d'environnement :
 #   GATEWAY_HARDENED=1     active la Phase 2 (nftables + abandon de privilèges)
 #   GATEWAY_ADDR_MODE=static  utilise l'IP fixe du gateway au lieu de la résolution DNS
+#   IA_PROJECT_ROOT         force la racine du projet (par défaut : dossier
+#                           parent de cette copie de ia-dev-containers)
+#   IA_PROJECT_NAME         force le nom utilisé pour scoper les ressources
+#                           Podman (par défaut : nom du dossier PROJECT_ROOT)
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_ROOT="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(dirname "$(dirname "$CLIENT_ROOT")")"
+PROJECT_ROOT="${IA_PROJECT_ROOT:-$(dirname "$REPO_ROOT")}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
@@ -38,11 +50,18 @@ build_images() {
     podman build -t "$WORKSPACE_IMAGE" -f "$CLIENT_ROOT/workspace/Dockerfile" "$CLIENT_ROOT"
 }
 
-ensure_network() {
-    if ! podman network exists "$NETWORK_NAME"; then
-        echo "🔧 Création du réseau interne $NETWORK_NAME ($SUBNET, --internal)..."
-        podman network create --internal --subnet "$SUBNET" "$NETWORK_NAME"
-    fi
+# Génère .devcontainer/devcontainer.json à partir du template : les valeurs
+# (réseau scopé projet, chemin du projet, volume ~/.local scopé projet) ne
+# peuvent pas être codées en dur, elles dépendent de PROJECT_ROOT/PROJECT_NAME.
+render_devcontainer() {
+    local template="$CLIENT_ROOT/.devcontainer/devcontainer.json.template"
+    local out="$CLIENT_ROOT/.devcontainer/devcontainer.json"
+    [ -f "$template" ] || return 0
+    sed \
+        -e "s|__NETWORK_NAME__|${NETWORK_NAME}|g" \
+        -e "s|__PROJECT_ROOT__|${PROJECT_ROOT}|g" \
+        -e "s|__LOCAL_VOLUME__|${LOCAL_VOLUME}|g" \
+        "$template" > "$out"
 }
 
 gateway_running() {
@@ -133,13 +152,23 @@ start_workspace() {
         secret_args_list+=("$line")
     done < <(secret_args)
 
+    # --security-opt=label=disable : /workspace est un bind-mount du vrai
+    # projet hôte (PROJECT_ROOT), pas un volume Podman. Sous SELinux
+    # (Fedora/RHEL), un bind-mount d'un chemin arbitraire est refusé sans
+    # relabeling. L'alternative `:Z` sur le -v relabelerait récursivement
+    # les fichiers RÉELS du projet sur le disque (effet de bord persistant
+    # hors du sandbox) ; label=disable désactive la confinement SELinux
+    # pour ce conteneur sans toucher aux labels du projet — vérifié : les
+    # deux permettent l'écriture, seul label=disable laisse `ls -Z` sur le
+    # projet hôte inchangé. No-op inoffensif sur les hôtes sans SELinux.
     podman run --rm -it --name "$WORKSPACE_CONTAINER" \
         --user "$(id -u):$(id -g)" --userns=keep-id \
         --cap-drop=ALL \
         --security-opt=no-new-privileges \
+        --security-opt=label=disable \
         --read-only --tmpfs=/tmp --tmpfs=/run \
         --network="$NETWORK_NAME" \
-        -v "${WORKSPACE_VOLUME}:/workspace" \
+        -v "${PROJECT_ROOT}:/workspace" \
         -v "${LOCAL_VOLUME}:/home/devuser/.local" \
         -v "${CACHE_VOLUME}:/home/devuser/.cache" \
         -e HTTP_PROXY="$proxy" -e HTTPS_PROXY="$proxy" \
@@ -156,13 +185,14 @@ case "$cmd" in
     up)
         need_podman
         build_images
-        ensure_network
+        ensure_network_and_ip
         start_gateway
+        render_devcontainer
         ;;
     shell)
         need_podman
         build_images
-        ensure_network
+        ensure_network_and_ip
         start_gateway
         [ "${1:-}" = "--" ] && shift
         start_workspace "$@"
@@ -170,7 +200,7 @@ case "$cmd" in
     test)
         need_podman
         build_images
-        ensure_network
+        ensure_network_and_ip
         start_gateway
         start_workspace /security-tests.sh
         ;;
@@ -193,6 +223,15 @@ case "$cmd" in
             echo ""
             echo "Machines podman :"
             podman machine list
+        fi
+        echo ""
+        echo "Projet détecté : $PROJECT_ROOT"
+        echo "Nom sandbox     : $PROJECT_NAME"
+        echo "Réseau          : $NETWORK_NAME"
+        if podman network exists "$NETWORK_NAME"; then
+            echo "  subnet (existant) : $(podman network inspect "$NETWORK_NAME" --format '{{(index .Subnets 0).Subnet}}')"
+        else
+            echo "  pas encore créé — sera un /24 dans 10.89.0.0/16 (choisi par 'run.sh up')"
         fi
         echo "✅ Vérifications préliminaires OK."
         ;;

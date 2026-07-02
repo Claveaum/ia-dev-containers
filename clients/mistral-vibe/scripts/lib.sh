@@ -1,10 +1,21 @@
 #!/bin/bash
 # Constantes partagées par run.sh et security-tests.sh.
-# Doit être sourcé, pas exécuté directement.
+# Doit être sourcé, pas exécuté directement. Suppose que PROJECT_ROOT et
+# CLIENT_ROOT sont déjà définis par l'appelant (run.sh) avant le `source`.
 
-NETWORK_NAME="ia-gw-internal"
-SUBNET="10.89.0.0/24"
-GATEWAY_IP="10.89.0.2"
+CLIENT_NAME="mistral-vibe"
+
+# Ce dossier (ia-dev-containers) est une copie autonome placée à la racine
+# du projet à sandboxer (ex: mon-projet/ia-dev-containers/) — PROJECT_ROOT
+# est son dossier parent. Plusieurs projets (donc plusieurs copies) peuvent
+# tourner en parallèle sur la même machine : tous les noms de ressources
+# Podman ci-dessous sont scopés par PROJECT_NAME pour éviter toute collision
+# entre projets. Contournable via IA_PROJECT_NAME (ex: deux projets qui
+# partagent le même nom de dossier).
+_sanitize_name() {
+    printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '-' | tr '[:upper:]' '[:lower:]'
+}
+PROJECT_NAME="${IA_PROJECT_NAME:-$(_sanitize_name "$(basename "$PROJECT_ROOT")")}"
 
 # dns   : le workspace joint le gateway via son alias réseau "gateway"
 #         (résolu par aardvark-dns sur le réseau interne).
@@ -15,16 +26,30 @@ GATEWAY_ADDR_MODE="${GATEWAY_ADDR_MODE:-dns}"
 # 1 = Phase 2 (gateway root-in-userns -> nftables -> abandon de privilèges)
 GATEWAY_HARDENED="${GATEWAY_HARDENED:-0}"
 
+# gateway-base/workspace-base : image partagée entre tous les projets et les
+# deux clients (aucun contenu spécifique à un projet, juste Alpine+Squid ou
+# Alpine+Python/Node) — un seul tag global profite du cache de layers.
 GATEWAY_BASE_IMAGE="ia-dev-containers-gateway-base:latest"
 WORKSPACE_BASE_IMAGE="ia-dev-containers-workspace-base:latest"
-GATEWAY_IMAGE="ia-dev-containers-gateway-mistral-vibe:latest"
-WORKSPACE_IMAGE="ia-dev-containers-workspace-mistral-vibe:latest"
 
-GATEWAY_CONTAINER="mistral-vibe-gateway"
-WORKSPACE_CONTAINER="mistral-vibe-workspace"
+# Overlay gateway/workspace : contient potentiellement des réglages propres
+# à ce projet (allowed-urls.txt) -> tag scopé par projet, sinon deux projets
+# qui tournent en parallèle écraseraient le même tag avec des configs
+# différentes pendant que l'autre tourne encore.
+GATEWAY_IMAGE="ia-dev-containers-gateway-${CLIENT_NAME}-${PROJECT_NAME}:latest"
+WORKSPACE_IMAGE="ia-dev-containers-workspace-${CLIENT_NAME}-${PROJECT_NAME}:latest"
 
-WORKSPACE_VOLUME="mistral-vibe-workspace"
-LOCAL_VOLUME="mistral-vibe-local"
+NETWORK_NAME="ia-gw-internal-${CLIENT_NAME}-${PROJECT_NAME}"
+GATEWAY_CONTAINER="${CLIENT_NAME}-${PROJECT_NAME}-gateway"
+WORKSPACE_CONTAINER="${CLIENT_NAME}-${PROJECT_NAME}-workspace"
+
+# ~/.local contient les VRAIS paquets installés par `pip install --user` (pas
+# un simple cache) : scopé par projet, pour qu'un paquet compromis installé
+# dans un projet ne devienne pas silencieusement importable depuis un autre.
+# ~/.cache ne contient que le cache de téléchargement pip (rien d'exécutable
+# "installé") : partagé entre projets par simplicité, pour éviter de
+# retélécharger les mêmes paquets pour chaque projet.
+LOCAL_VOLUME="mistral-vibe-local-${PROJECT_NAME}"
 CACHE_VOLUME="mistral-vibe-cache"
 
 # Secrets exposés en variable d'environnement dans le workspace via
@@ -47,6 +72,56 @@ proxy_url() {
 # n'est JAMAIS lancé avec -v /run/podman/podman.sock, -v /run/docker.sock,
 # ni --device. C'est ça, et pas un chmod interne au conteneur, qui empêche
 # l'accès aux sockets/devices de l'hôte.
+
+# --- Allocation de subnet par (projet, client) ---
+# squid.conf (workspace_net) et gateway.nft acceptent tout 10.89.0.0/16 :
+# chaque réseau --internal reçoit un /24 déterministe dans cette plage
+# (dérivé du chemin absolu du projet), avec repli séquentiel en cas de
+# collision (deux projets différents peuvent, rarement, dériver le même
+# offset). `cksum` est utilisé pour le hash : POSIX, disponible sur
+# Linux/macOS/WSL2 sans dépendance supplémentaire (contrairement à sha256sum,
+# absent de macOS par défaut).
+_subnet_offset_seed() {
+    printf '%s:%s' "$PROJECT_ROOT" "$CLIENT_NAME" | cksum | awk '{print $1}'
+}
+
+# Résout SUBNET/GATEWAY_IP et crée le réseau --internal s'il n'existe pas
+# encore. Si le réseau existe déjà (cas normal : deuxième `run.sh` sur le
+# même projet), relit son subnet réel via `podman network inspect` plutôt
+# que de recalculer — source de vérité unique, ne peut pas diverger même
+# après un éventuel repli de collision lors de la création initiale.
+ensure_network_and_ip() {
+    if podman network exists "$NETWORK_NAME"; then
+        SUBNET="$(podman network inspect "$NETWORK_NAME" --format '{{(index .Subnets 0).Subnet}}')"
+    else
+        local seed offset created=0 i last_err
+        seed="$(_subnet_offset_seed)"
+        offset=$(( (seed % 240) + 10 ))
+        echo "🔧 Création du réseau interne $NETWORK_NAME (--internal)..."
+        for i in $(seq 1 20); do
+            SUBNET="10.89.${offset}.0/24"
+            if last_err="$(podman network create --internal --subnet "$SUBNET" "$NETWORK_NAME" 2>&1 >/dev/null)"; then
+                created=1
+                break
+            fi
+            offset=$(( offset + 1 ))
+            [ "$offset" -gt 249 ] && offset=10
+        done
+        if [ "$created" != "1" ]; then
+            # N'importe quelle erreur (pas seulement une collision de subnet)
+            # fait échouer chaque essai de la boucle : sur Windows/podman
+            # machine avec le bug nftables #25201 par exemple, TOUTES les
+            # tentatives échoueraient pour la même raison (pare-feu, pas
+            # subnet). Afficher la dernière erreur réelle plutôt qu'un
+            # message générique qui pointerait vers la mauvaise cause.
+            echo "❌ Impossible de créer $NETWORK_NAME après 20 essais de subnet." >&2
+            echo "   Dernière erreur podman : $last_err" >&2
+            echo "   Si l'erreur mentionne nftables sur Windows (podman machine), voir docs/windows.md." >&2
+            exit 1
+        fi
+    fi
+    GATEWAY_IP="$(printf '%s' "$SUBNET" | cut -d. -f1-3).2"
+}
 
 # Détection best-effort de la plateforme hôte et, sur macOS/Windows, de
 # l'état de la VM "podman machine" (Podman n'y tourne jamais nativement).
