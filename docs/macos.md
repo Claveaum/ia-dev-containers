@@ -35,6 +35,10 @@ cd clients/mistral-vibe   # ou clients/copilot
 
 `/workspace`, `~/.local` (ou `~/.npm-global` pour Copilot) et `~/.cache` sont des **volumes Podman nommés**, jamais des bind-mounts d'un répertoire de l'hôte. Ce choix a été fait pour la compatibilité `--read-only`, mais il a un bénéfice direct sur macOS : le stockage de ces volumes vit à l'intérieur du disque de la VM `podman machine`, pas à travers une couche de partage de fichiers hôte↔VM (virtiofs/9p) où les décalages d'UID/GID entre l'utilisateur macOS et l'utilisateur à l'intérieur de la VM causent classiquement des problèmes de permissions. Rien à faire de spécial ici — c'est un acquis de l'architecture existante, pas une adaptation macOS.
 
+## Compatibilité bash des scripts `run.sh`
+
+macOS fournit bash 3.2 en `/bin/bash` par défaut (pas de `mapfile`, et — piège plus subtil — sous `set -u`, l'expansion d'un tableau vide `"${arr[@]}"` lève `unbound variable`, contrairement à bash ≥4.4). Les deux `run.sh` en dépendaient (secrets absents, `.env` absent, gateway durci) et auraient planté au tout premier lancement sur macOS. **Vérifié dans ce sandbox** (pas seulement lu dans le code) via `podman run --rm -i docker.io/library/bash:3.2 bash -s < script.sh` reproduisant le chemin vide puis confirmant le correctif (`${arr[@]+"${arr[@]}"}`) ; suite de sécurité complète (12/12, deux phases, deux clients) rejouée sur Linux ensuite sans régression. Ceci ne remplace pas un test sur bash 3.2 réel macOS, mais couvre la même version exacte de l'interpréteur.
+
 ## Check-list de validation à faire sur matériel réel (non exécutée dans cette session)
 
 Cette section décrit ce qu'il reste à vérifier — elle n'a pas pu être exécutée ici (pas de matériel macOS disponible).

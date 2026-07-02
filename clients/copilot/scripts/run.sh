@@ -70,7 +70,7 @@ start_gateway() {
     fi
 
     podman run -d --name "$GATEWAY_CONTAINER" \
-        "${user_args[@]}" \
+        ${user_args[@]+"${user_args[@]}"} \
         "${cap_args[@]}" \
         --security-opt=no-new-privileges \
         --read-only --tmpfs=/tmp --tmpfs=/run \
@@ -122,7 +122,10 @@ start_workspace() {
     [ -f "$env_file" ] && env_args+=(--env-file "$env_file")
 
     # while/read plutôt que `mapfile` (bash >=4) : macOS fournit bash 3.2 en
-    # /bin/bash par défaut, où `mapfile` n'existe pas.
+    # /bin/bash par défaut, où `mapfile` n'existe pas. Les "${arr[@]}" plus bas
+    # sont gardés en "${arr[@]+...}" : sous `set -u`, bash 3.2 (contrairement
+    # à bash >=4.4) lève "unbound variable" sur l'expansion d'un tableau vide
+    # (vérifié empiriquement : podman run --rm -i bash:3.2 ...).
     local secret_args_list=()
     while IFS= read -r line; do
         secret_args_list+=("$line")
@@ -139,8 +142,8 @@ start_workspace() {
         -v "${CACHE_VOLUME}:/home/devuser/.cache" \
         -e HTTP_PROXY="$proxy" -e HTTPS_PROXY="$proxy" \
         -e IA_CLIENT=copilot \
-        "${secret_args_list[@]}" \
-        "${env_args[@]}" \
+        ${secret_args_list[@]+"${secret_args_list[@]}"} \
+        ${env_args[@]+"${env_args[@]}"} \
         "$WORKSPACE_IMAGE" "$@"
 }
 

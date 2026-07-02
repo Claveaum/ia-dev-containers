@@ -38,7 +38,7 @@ cd clients/mistral-vibe   # ou clients/copilot
 ./scripts/run.sh shell
 ```
 
-Un vrai bash est nécessaire dans les deux cas : le shell WSL2 (Option B, ou Option A si vous utilisez l'intégration WSL de Podman Desktop) est un bash/coreutils complet par construction ; Git Bash (bundlé avec "Git for Windows") fonctionne aussi si vous utilisez Podman Desktop sans WSL2.
+Un vrai bash est nécessaire dans les deux cas : le shell WSL2 (Option B, ou Option A si vous utilisez l'intégration WSL de Podman Desktop) est un bash/coreutils complet par construction ; Git Bash (bundlé avec "Git for Windows") fonctionne aussi si vous utilisez Podman Desktop sans WSL2. Les `run.sh` sont compatibles bash 3.2 (voir la [note équivalente côté macOS](macos.md#compatibilité-bash-des-scripts-runsh) — même correctif, vérifié via un vrai bash 3.2 dans ce sandbox), donc aucune version de bash récente n'est requise ici non plus.
 
 ## Check-list de validation à faire sur matériel réel (non exécutée dans cette session)
 
