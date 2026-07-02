@@ -4,9 +4,13 @@
 # Rôle : exécute le CLI IA (non fiable). Aucun accès réseau direct - attaché
 # uniquement au réseau interne ia-gw-internal, ne peut joindre que le gateway.
 # Pas de squid/iptables ici : le filtrage réseau vit entièrement dans le
-# conteneur gateway (voir gateway-base/).
+# conteneur gateway (voir gateway-base/, resté en 3.20 - aucune dépendance
+# Node côté gateway, pas de raison de faire bouger un composant audité).
+#
+# 3.21 (et non 3.20) car le client Copilot a besoin de Node.js >= 22, que
+# seul Alpine >= 3.21 fournit nativement (`nodejs` = 22.23.0-r0).
 # =============================================================================
-FROM alpine:3.20
+FROM alpine:3.21
 
 ARG USERNAME=devuser
 ARG USER_UID=1000

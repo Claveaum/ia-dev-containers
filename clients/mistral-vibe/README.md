@@ -134,12 +134,15 @@ podman exec mistral-vibe-gateway /gateway-checks.sh
 ## 🔄 **Mise à jour**
 
 ```bash
-podman pull docker.io/library/alpine:3.20
+podman pull docker.io/library/alpine:3.20   # gateway-base
+podman pull docker.io/library/alpine:3.21   # workspace-base (partagé avec le client Copilot)
 ./scripts/run.sh down --purge-network
 podman build --no-cache -t ia-dev-containers-gateway-base:latest ../../gateway-base
 podman build --no-cache -t ia-dev-containers-workspace-base:latest ../../workspace-base
 ./scripts/run.sh up
 ```
+
+> `gateway-base` et `workspace-base` sont partagés avec [le client Copilot](../copilot/README.md) : reconstruire l'un ou l'autre affecte les deux clients.
 
 ---
 

@@ -57,26 +57,32 @@ ia-dev-containers/
 │   └── scripts/entrypoint.sh
 │
 ├── clients/                       # 🎯 Solutions par client IA
-│   └── mistral-vibe/              # Solution pour Mistral Vibe CLI
-│       ├── gateway/               # Overlay : allowlist de domaines spécifique
-│       │   ├── Dockerfile
-│       │   ├── config/allowed-urls.txt
-│       │   └── scripts/gateway-checks.sh
-│       ├── workspace/             # Overlay : Python 3 + pip
-│       │   └── Dockerfile
-│       ├── scripts/
-│       │   ├── lib.sh             # Constantes partagées (réseau, images, noms)
-│       │   ├── run.sh             # Orchestration : up|shell|test|down
-│       │   └── security-tests.sh  # Suite de vérification (exécutée dans le workspace)
-│       ├── .devcontainer/
-│       │   └── devcontainer.json  # Configuration VS Code (workspace uniquement)
-│       ├── .env.example           # Modèle pour les secrets (MISTRAL_API_KEY, ...)
-│       └── README.md
+│   ├── mistral-vibe/              # Solution pour Mistral Vibe CLI (Python)
+│   │   ├── gateway/               # Overlay : allowlist de domaines spécifique
+│   │   │   ├── Dockerfile
+│   │   │   ├── config/allowed-urls.txt
+│   │   │   └── scripts/gateway-checks.sh
+│   │   ├── workspace/             # Overlay : Python 3 + pip
+│   │   │   └── Dockerfile
+│   │   ├── scripts/
+│   │   │   ├── lib.sh             # Constantes partagées (réseau, images, noms)
+│   │   │   ├── run.sh             # Orchestration : up|shell|test|down
+│   │   │   └── security-tests.sh  # Suite de vérification (exécutée dans le workspace)
+│   │   ├── .devcontainer/
+│   │   │   └── devcontainer.json  # Configuration VS Code (workspace uniquement)
+│   │   ├── .env.example           # Modèle pour les secrets (MISTRAL_API_KEY, ...)
+│   │   └── README.md
+│   │
+│   └── copilot/                   # Solution pour GitHub Copilot CLI (Node.js)
+│       ├── gateway/ workspace/ scripts/ .devcontainer/ .env.example / README.md
+│       └── (même structure que mistral-vibe/, réseau interne dédié)
 │
 └── .gitignore                     # Ignore les .env réels
 ```
 
-`clients/copilot/` n'existe pas encore ; `gateway-base/` et `workspace-base/` sont conçus pour être réutilisés tels quels par un futur client Copilot.
+`gateway-base/` et `workspace-base/` sont partagés par les deux clients. `gateway-base` reste sur Alpine 3.20 (Squid/nftables/abandon de privilèges déjà audités, aucune raison de le faire bouger). `workspace-base` est sur Alpine 3.21 (nécessaire pour Node.js ≥ 22, requis par Copilot CLI ; mistral-vibe en bénéficie aussi sans regression, revalidé après le bump).
+
+Chaque client a son propre réseau `--internal` avec un subnet `/24` distinct (mistral-vibe : `10.89.0.0/24`, copilot : `10.89.1.0/24` — Podman refuse deux réseaux sur le même subnet). L'ACL `workspace_net` de `gateway-base/config/squid.conf` couvre `10.89.0.0/16` pour englober tous les clients présents et futurs. **Testé** : les deux clients tournent simultanément sans conflit.
 
 ---
 
@@ -109,6 +115,20 @@ Pour activer le durcissement du gateway (nftables + abandon de privilèges) :
 GATEWAY_HARDENED=1 ./scripts/run.sh up
 ```
 
+### GitHub Copilot CLI
+
+Même principe, dans `clients/copilot/` :
+```bash
+cd ia-dev-containers/clients/copilot
+./scripts/run.sh up
+./scripts/run.sh shell
+```
+```bash
+npm install -g @github/copilot
+copilot
+```
+Voir le [README Copilot](clients/copilot/README.md) pour l'authentification et les limites de validation (une session authentifiée réelle n'a pas pu être testée sans abonnement Copilot).
+
 ---
 
 ## 🔒 **Mesures de sécurité implémentées**
@@ -132,6 +152,8 @@ GATEWAY_HARDENED=1 ./scripts/run.sh up
 
 ## 🌐 **URLs autorisées par défaut (Mistral Vibe)**
 
+*(Pour Copilot, voir [clients/copilot/README.md](clients/copilot/README.md#-domaines-autorisés-par-défaut).)*
+
 - **Mistral AI** : `api.mistral.ai`, `mistral.ai`
 - **GitHub** : `github.com`, `api.github.com`, `raw.githubusercontent.com`, `camo.githubusercontent.com`, `user-images.githubusercontent.com`
 - **PyPI** : `pypi.org`, `pypi.python.org`, `files.pythonhosted.org`
@@ -150,8 +172,8 @@ GATEWAY_HARDENED=1 ./scripts/run.sh up
 
 | **Client** | **Langage** | **Statut** |
 |-----------|-------------|-----------|
-| Mistral Vibe | Python 3 | ✅ **Généré et testé** (Phase simple + durcie) |
-| GitHub Copilot | Node.js | ⏳ À générer |
+| Mistral Vibe | Python 3 | ✅ **Généré et testé** (Phase simple + durcie, `pip install` réel via le gateway) |
+| GitHub Copilot | Node.js 22+ | ✅ **Généré et testé** (Phase simple + durcie, `npm install -g @github/copilot` réel via le gateway) ; session authentifiée non testée (nécessite un abonnement Copilot) |
 
 ---
 
@@ -160,9 +182,9 @@ GATEWAY_HARDENED=1 ./scripts/run.sh up
 ### Ajouter un nouveau client IA
 
 1. Créer `clients/<nom-du-client>/gateway/` avec un `Dockerfile` (`FROM ia-dev-containers-gateway-base:latest`) + `config/allowed-urls.txt`.
-2. Créer `clients/<nom-du-client>/workspace/` avec un `Dockerfile` (`FROM ia-dev-containers-workspace-base:latest`), qui doit se terminer par `USER devuser` (tout ce qui précède, comme `apk add`, a besoin de root).
-3. Copier et adapter `clients/mistral-vibe/scripts/{lib.sh,run.sh,security-tests.sh}`.
-4. `./scripts/run.sh up` pour construire et valider.
+2. Créer `clients/<nom-du-client>/workspace/` avec un `Dockerfile` (`FROM ia-dev-containers-workspace-base:latest`), qui doit se terminer par `USER devuser` (tout ce qui précède, comme `apk add`, a besoin de root). N'installez jamais le CLI IA lui-même au build (comme pip/npm au runtime pour les clients existants) : `HTTP_PROXY` ne pointe vers un `gateway` joignable qu'au runtime, pas au moment du build.
+3. Copier et adapter `clients/mistral-vibe/scripts/{lib.sh,run.sh,security-tests.sh}` — **attribuer un nouveau subnet `/24` inutilisé** dans `lib.sh` (`SUBNET`/`GATEWAY_IP`), Podman refuse deux réseaux `--internal` sur le même subnet. L'ACL `workspace_net` de `gateway-base/config/squid.conf` couvre déjà `10.89.0.0/16`, donc tout `/24` dans cette plage fonctionne sans y toucher.
+4. `./scripts/run.sh up` puis `./scripts/run.sh test` pour construire et valider réellement (pas seulement lire le code).
 
 ---
 
@@ -200,7 +222,7 @@ Ajoutez-le à `clients/mistral-vibe/gateway/config/allowed-urls.txt`, puis recon
 ## 📚 **Documentation par client**
 
 - **[Mistral Vibe CLI](clients/mistral-vibe/README.md)** — solution complète, testée
-- GitHub Copilot CLI — à générer
+- **[GitHub Copilot CLI](clients/copilot/README.md)** — solution complète, testée (mécanique du sandbox ; session authentifiée non testée)
 
 ---
 

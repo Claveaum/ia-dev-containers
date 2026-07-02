@@ -1,0 +1,41 @@
+# =============================================================================
+# GitHub Copilot CLI - Liste des domaines autorisés (allowlist du gateway)
+#
+# Domaines Copilot tirés de la référence officielle GitHub (sous-ensemble
+# pertinent pour le CLI local, pas pour l'agent cloud de GitHub qui a sa
+# propre liste bien plus large - non applicable ici) :
+#   https://docs.github.com/en/copilot/reference/copilot-allowlist-reference
+#
+# Squid dstdomain : une entrée SANS point de tête ("github.com") ne matche
+# QUE cet hôte exact, pas ses sous-domaines. Une entrée AVEC point de tête
+# (".githubcopilot.com") matche le domaine ET tous ses sous-domaines - c'est
+# ce qu'il faut pour les endpoints Copilot qui varient par plan/région
+# (individual./business./enterprise.githubcopilot.com, etc.).
+# =============================================================================
+
+# --- Authentification et Copilot sur github.com ---
+github.com
+api.github.com
+
+# --- API Copilot (suggestions, chat) - sous-domaines multiples selon le plan ---
+.githubcopilot.com
+
+# --- Télémétrie et expérimentation client (désactivable en commentant ces
+# lignes si non souhaité - Copilot CLI doit rester fonctionnel sans) ---
+collector.github.com
+copilot-telemetry.githubusercontent.com
+default.exp-tas.com
+
+# --- Proxy de suggestions (historique, toujours référencé par la doc) ---
+copilot-proxy.githubusercontent.com
+origin-tracker.githubusercontent.com
+
+# --- Contenu GitHub (clone, releases, images) ---
+raw.githubusercontent.com
+camo.githubusercontent.com
+objects.githubusercontent.com
+codeload.github.com
+
+# --- npm (installation du CLI et des dépendances des projets) ---
+registry.npmjs.org
+npmjs.org

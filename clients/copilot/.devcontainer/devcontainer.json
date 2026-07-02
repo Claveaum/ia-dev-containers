@@ -1,0 +1,70 @@
+{
+  // ⚠️ PRÉREQUIS OBLIGATOIRE : ce devcontainer ne construit/lance que le
+  // conteneur "workspace". Le conteneur "gateway" (proxy Squid, filtrage
+  // réseau) et le réseau interne partagé doivent déjà exister AVANT
+  // d'ouvrir ce dossier dans VS Code :
+  //
+  //   cd clients/copilot && ./scripts/run.sh up
+  //
+  // Si le réseau "ia-gw-internal-copilot" n'existe pas encore, la création
+  // du conteneur échouera (runArgs y fait référence ci-dessous).
+  "name": "GitHub Copilot CLI - Workspace (sandbox à deux conteneurs)",
+  "containerUser": "devuser",
+  "remoteUser": "devuser",
+
+  "build": {
+    "dockerfile": "../workspace/Dockerfile",
+    "context": ".."
+  },
+
+  "mounts": [
+    {
+      "source": "copilot-workspace",
+      "target": "/workspace",
+      "type": "volume"
+    },
+    {
+      "source": "copilot-npm-global",
+      "target": "/home/devuser/.npm-global",
+      "type": "volume"
+    },
+    {
+      "source": "copilot-cache",
+      "target": "/home/devuser/.cache",
+      "type": "volume"
+    }
+  ],
+
+  "runArgs": [
+    "--userns=keep-id",
+    "--security-opt=no-new-privileges",
+    "--cap-drop=ALL",
+    "--read-only",
+    "--tmpfs=/tmp",
+    "--tmpfs=/run",
+    "--network=ia-gw-internal-copilot",
+    "-e=HTTP_PROXY=http://gateway:3128",
+    "-e=HTTPS_PROXY=http://gateway:3128",
+    "-e=IA_CLIENT=copilot"
+  ],
+
+  "postCreateCommand": "/security-tests.sh || echo '⚠️  Des tests ont échoué - vérifiez que ./scripts/run.sh up a bien été lancé AVANT d'\\''ouvrir ce dossier (le gateway doit déjà tourner sur ia-gw-internal-copilot).'",
+
+  "postStartCommand": "echo '🎉 Conteneur workspace Copilot CLI prêt !' && echo '' && echo '   Proxy (via gateway) : http://gateway:3128' && echo '' && echo '   Pour installer le CLI :' && echo '   $ npm install -g @github/copilot' && echo '' && echo '   Seuls les remotes git en HTTPS fonctionnent (pas de SSH/port 22).'",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  "forwardPorts": [],
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stop"
+}
