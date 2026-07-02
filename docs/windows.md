@@ -31,8 +31,13 @@ Aucun `podman machine` ici : WSL2 fournit déjà un vrai noyau Linux, donc Podma
 
 ## Utilisation (identique aux deux options, une fois Podman disponible)
 
+Comme sur Linux/macOS, `ia-dev-containers` doit être copié à la racine du
+projet à sandboxer avant tout `run.sh` (voir le [README racine](../README.md#-utilisation-rapide-mistral-vibe-cli)) :
+
 ```bash
-cd clients/mistral-vibe   # ou clients/copilot
+# Depuis la racine de VOTRE projet (pas ce dépôt) :
+cp -r /chemin/vers/ia-dev-containers .
+cd ia-dev-containers/clients/mistral-vibe   # ou clients/copilot
 ./scripts/run.sh doctor
 ./scripts/run.sh up
 ./scripts/run.sh shell

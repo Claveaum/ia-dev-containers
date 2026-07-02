@@ -57,10 +57,14 @@ render_devcontainer() {
     local template="$CLIENT_ROOT/.devcontainer/devcontainer.json.template"
     local out="$CLIENT_ROOT/.devcontainer/devcontainer.json"
     [ -f "$template" ] || return 0
+    # PROJECT_ROOT est un chemin hôte arbitraire (pas sanitizé comme
+    # NETWORK_NAME/LOCAL_VOLUME) : échappé via _sed_escape_replacement
+    # (scripts/common.sh) pour éviter qu'un "&" ou un "|" dans le chemin ne
+    # corrompe silencieusement le fichier généré ou ne fasse échouer ce sed.
     sed \
-        -e "s|__NETWORK_NAME__|${NETWORK_NAME}|g" \
-        -e "s|__PROJECT_ROOT__|${PROJECT_ROOT}|g" \
-        -e "s|__LOCAL_VOLUME__|${LOCAL_VOLUME}|g" \
+        -e "s|__NETWORK_NAME__|$(_sed_escape_replacement "$NETWORK_NAME")|g" \
+        -e "s|__PROJECT_ROOT__|$(_sed_escape_replacement "$PROJECT_ROOT")|g" \
+        -e "s|__LOCAL_VOLUME__|$(_sed_escape_replacement "$LOCAL_VOLUME")|g" \
         "$template" > "$out"
 }
 

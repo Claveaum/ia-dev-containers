@@ -22,10 +22,14 @@ Provider par défaut : `applehv` sur Apple Silicon (macOS ≥ 13) ou `qemu` sino
 
 ## Utilisation
 
-Une fois la VM démarrée, tout le reste est identique à Linux :
+Une fois la VM démarrée, tout le reste est identique à Linux — y compris la
+copie de `ia-dev-containers` à la racine du projet à sandboxer, requise avant
+tout `run.sh` (voir le [README racine](../README.md#-utilisation-rapide-mistral-vibe-cli)) :
 
 ```bash
-cd clients/mistral-vibe   # ou clients/copilot
+# Depuis la racine de VOTRE projet (pas ce dépôt) :
+cp -r /chemin/vers/ia-dev-containers .
+cd ia-dev-containers/clients/mistral-vibe   # ou clients/copilot
 ./scripts/run.sh doctor   # vérifie que la VM est bien détectée
 ./scripts/run.sh up
 ./scripts/run.sh shell
