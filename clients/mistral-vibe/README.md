@@ -17,6 +17,7 @@ Voir le [README racine](../../README.md#️-architecture--deux-conteneurs-gatewa
 ### **Prérequis**
 
 - [Podman](https://podman.io/) installé (testé avec Podman 5.8.3, rootless, backend réseau `netavark`)
+- macOS/Windows : voir [docs/macos.md](../../docs/macos.md) / [docs/windows.md](../../docs/windows.md) avant de continuer — expérimental, non vérifié sur matériel réel.
 
 ### **Démarrage**
 

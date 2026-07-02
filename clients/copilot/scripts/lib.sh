@@ -51,3 +51,44 @@ proxy_url() {
 # n'est JAMAIS lancé avec -v /run/podman/podman.sock, -v /run/docker.sock,
 # ni --device. C'est ça, et pas un chmod interne au conteneur, qui empêche
 # l'accès aux sockets/devices de l'hôte.
+
+# Détection best-effort de la plateforme hôte et, sur macOS/Windows, de
+# l'état de la VM "podman machine" (Podman n'y tourne jamais nativement).
+# Sur Linux, ne fait rien (pas de VM) : retour immédiat, zéro changement
+# de comportement sur la plateforme déjà validée.
+# Non vérifié sur matériel macOS/Windows réel (voir docs/macos.md,
+# docs/windows.md) : la détection d'existence est fiable (testée y compris
+# sur Linux sans machine configurée), la détection de l'état "Running" est
+# volontairement best-effort/non bloquante.
+preflight_platform_check() {
+    local os
+    os="$(uname -s)"
+    case "$os" in
+        Linux) return 0 ;;
+        Darwin|MINGW*|MSYS*|CYGWIN*) ;;
+        *)
+            echo "⚠️  Plateforme hôte non reconnue ($os) — poursuite sans vérification podman machine." >&2
+            return 0
+            ;;
+    esac
+
+    local machine_names
+    machine_names="$(podman machine list -q 2>/dev/null || true)"
+    if [ -z "$machine_names" ]; then
+        cat >&2 <<'EOF'
+❌ Aucune VM "podman machine" détectée sur cette plateforme (macOS/Windows).
+   Podman a besoin d'une machine virtuelle Linux pour fonctionner ici. Lancez :
+     podman machine init
+     podman machine start
+   puis relancez cette commande. Voir docs/macos.md ou docs/windows.md.
+EOF
+        exit 1
+    fi
+
+    local machine_json
+    machine_json="$(podman machine list --format json 2>/dev/null || true)"
+    if [ -n "$machine_json" ] && ! printf '%s' "$machine_json" | grep -Eq '"Running":[[:space:]]*true'; then
+        echo "⚠️  Aucune VM podman machine ne semble démarrée. Si la suite échoue :" >&2
+        echo "     podman machine start" >&2
+    fi
+}

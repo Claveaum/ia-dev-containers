@@ -25,6 +25,7 @@ Ce client a été validé pour les mêmes propriétés mécaniques que mistral-v
 ### **Prérequis**
 
 - [Podman](https://podman.io/) installé (testé avec Podman 5.8.3, rootless, backend réseau `netavark`)
+- macOS/Windows : voir [docs/macos.md](../../docs/macos.md) / [docs/windows.md](../../docs/windows.md) avant de continuer — expérimental, non vérifié sur matériel réel.
 
 ### **Démarrage**
 

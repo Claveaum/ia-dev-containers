@@ -10,6 +10,7 @@ set -euo pipefail
 #   run.sh test                  lance le workspace et exécute security-tests.sh
 #   run.sh down [--purge-network] arrête les conteneurs (et supprime le réseau)
 #   run.sh secrets                affiche le statut des secrets attendus (voir lib.sh: SECRETS)
+#   run.sh doctor                  diagnostic plateforme hôte / podman machine (macOS, Windows)
 #
 # Variables d'environnement :
 #   GATEWAY_HARDENED=1     active la Phase 2 (nftables + abandon de privilèges)
@@ -24,6 +25,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 need_podman() {
     command -v podman &> /dev/null || { echo "❌ podman n'est pas installé" >&2; exit 1; }
+    preflight_platform_check
 }
 
 build_images() {
@@ -119,8 +121,12 @@ start_workspace() {
     local env_args=()
     [ -f "$env_file" ] && env_args+=(--env-file "$env_file")
 
+    # while/read plutôt que `mapfile` (bash >=4) : macOS fournit bash 3.2 en
+    # /bin/bash par défaut, où `mapfile` n'existe pas.
     local secret_args_list=()
-    mapfile -t secret_args_list < <(secret_args)
+    while IFS= read -r line; do
+        secret_args_list+=("$line")
+    done < <(secret_args)
 
     podman run --rm -it --name "$WORKSPACE_CONTAINER" \
         --user "$(id -u):$(id -g)" --userns=keep-id \
@@ -174,8 +180,19 @@ case "$cmd" in
         need_podman
         list_secrets
         ;;
+    doctor)
+        need_podman
+        echo "Système hôte : $(uname -s) ($(uname -m))"
+        echo "podman        : $(podman version --format '{{.Client.Version}}' 2>/dev/null || echo inconnu)"
+        if [ "$(uname -s)" != "Linux" ]; then
+            echo ""
+            echo "Machines podman :"
+            podman machine list
+        fi
+        echo "✅ Vérifications préliminaires OK."
+        ;;
     *)
-        echo "usage: run.sh {up|shell [-- CMD...]|test|down [--purge-network]|secrets}" >&2
+        echo "usage: run.sh {up|shell [-- CMD...]|test|down [--purge-network]|secrets|doctor}" >&2
         exit 1
         ;;
 esac

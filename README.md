@@ -131,6 +131,20 @@ Voir le [README Copilot](clients/copilot/README.md) pour l'authentification et l
 
 ---
 
+## 🖥️ **Plateformes hôte**
+
+| Plateforme | Statut | Guide |
+|---|---|---|
+| Linux | ✅ **Testé** (Podman 5.8.3 rootless, netavark) | ce README |
+| macOS | ⚠️ **Expérimental, non vérifié sur matériel réel** | [docs/macos.md](docs/macos.md) |
+| Windows | ⚠️ **Expérimental, non vérifié sur matériel réel** (bug amont connu, voir [Dépannage](#-dépannage)) | [docs/windows.md](docs/windows.md) |
+
+Sur macOS/Windows, Podman ne tourne jamais nativement : il passe par une VM Linux (`podman machine`). L'architecture (isolation réseau par topologie, allowlist Squid) devrait s'y comporter à l'identique — mais ça n'a été vérifié que par analyse de l'architecture de `podman machine`, pas par exécution réelle. Tant que ce n'est pas fait, ces deux plateformes restent étiquetées expérimentales, dans le même esprit que la limite déjà documentée pour le client Copilot ("session authentifiée non testée") : ne rien affirmer de vérifié qui ne l'est pas.
+
+`./scripts/run.sh doctor` (dans chaque client) diagnostique la plateforme hôte et l'état de la VM `podman machine` le cas échéant.
+
+---
+
 ## 🔒 **Mesures de sécurité implémentées**
 
 | **Catégorie** | **Mesure** | **Où** |
@@ -207,6 +221,23 @@ Ajoutez-le à `clients/mistral-vibe/gateway/config/allowed-urls.txt`, puis recon
 ./scripts/run.sh shell -- curl -x http://gateway:3128 https://github.com   # doit réussir
 ./scripts/run.sh shell -- curl --noproxy '*' https://1.1.1.1               # doit échouer (network unreachable)
 ```
+
+### Windows (podman machine, provider `wsl`) : `podman network create --internal` échoue avec une erreur nftables
+
+**Symptôme** : `./scripts/run.sh up` échoue à la création du réseau avec un message du type `nftables error: nft did not return successfully while applying ruleset` ou `Could not process rule: No such file or directory`.
+
+**Cause** : bug amont connu, pas spécifique à ce projet — [containers/podman#25201](https://github.com/containers/podman/issues/25201) (ouvert le 2025-02-03, encore ouvert au moment de cette recherche, 2026-07). Le driver de pare-feu par défaut de `netavark` (`nftables`) est cassé dans une VM `podman machine` provider `wsl` sous Windows. C'est le pare-feu **interne** de Podman/netavark (utilisé pour implémenter `--internal`) qui est en cause — pas les règles nftables que notre propre `gateway` charge en Phase durcie (`GATEWAY_HARDENED=1`) via `nft -f`, qui s'exécutent dans un conteneur Linux classique et sont un mécanisme totalement indépendant portant juste le même nom.
+
+**Contournement documenté en amont** : forcer `netavark` sur `iptables`. Dans la VM (`podman machine ssh`), créez/éditez `~/.config/containers/containers.conf` :
+```toml
+[network]
+firewall_driver = "iptables"
+```
+puis `podman machine stop && podman machine start`.
+
+**Alternative recommandée** : installer Podman directement dans une distribution WSL2 (`apt install podman` sous Ubuntu-on-WSL2), sans passer par `podman machine` — WSL2 fournit déjà un vrai noyau Linux, ce qui rend ce chemin équivalent à Linux natif et contourne ce bug de provider. Voir [docs/windows.md](docs/windows.md).
+
+**Statut** : contournement rapporté par l'upstream Podman ; **non vérifié sur matériel Windows réel** dans le cadre de ce projet (voir [🖥️ Plateformes hôte](#️-plateformes-hôte) plus haut).
 
 ---
 
