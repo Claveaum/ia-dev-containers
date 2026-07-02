@@ -1,0 +1,80 @@
+{
+  "name": "Mistral Vibe CLI Dev Container",
+  "dockerHost": "unix:///run/user/${uid}/podman/podman.sock",
+  "containerUser": "devuser",
+  "remoteUser": "devuser",
+  
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "USERNAME": "devuser",
+      "USER_UID": "${uid}",
+      "USER_GID": "${gid}"
+    },
+    "context": "../../.."
+  },
+  
+  "mounts": [
+    {
+      "source": "${localWorkspaceFolder}/../../../workspace",
+      "target": "/workspace",
+      "type": "bind"
+    },
+    {
+      "source": "mistral-vibe-local",
+      "target": "/home/devuser/.local",
+      "type": "volume"
+    },
+    {
+      "source": "mistral-vibe-cache",
+      "target": "/home/devuser/.cache",
+      "type": "volume"
+    }
+  ],
+  
+  "runArgs": [
+    "--userns=keep-id",
+    "--security-opt=no-new-privileges",
+    "--cap-drop=ALL",
+    "--network=none",
+    "--read-only",
+    "--tmpfs=/tmp",
+    "--tmpfs=/run",
+    "-e=HTTP_PROXY=http://localhost:3128",
+    "-e=HTTPS_PROXY=http://localhost:3128",
+    "-e=NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+    "-e=IA_CLIENT=mistral-vibe",
+    "-e=MISTRAL_API_URL=https://api.mistral.ai"
+  ],
+  
+  "postCreateCommand": "/setup-proxy.sh && echo '✅ Proxy démarré' && /security-tests.sh",
+  
+  "postStartCommand": "echo '🎉 Conteneur Mistral Vibe CLI prêt !' && echo '' && echo '   Proxy : http://localhost:3128' && echo '' && echo '   Pour installer Mistral Vibe :' && echo '   $ pip install --user mistral-vibe' && echo '' && echo '   Pour démarrer :' && echo '   $ mistral-vibe'",
+  
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.black-formatter",
+        "ms-python.isort",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        "python.pythonPath": "/home/devuser/.local/bin/python3",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black",
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.black-formatter"
+        },
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  
+  "forwardPorts": [],
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stop"
+}
