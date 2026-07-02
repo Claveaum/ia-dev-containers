@@ -31,6 +31,14 @@ WORKSPACE_VOLUME="copilot-workspace"
 NPM_GLOBAL_VOLUME="copilot-npm-global"
 CACHE_VOLUME="copilot-cache"
 
+# Secrets exposés en variable d'environnement dans le workspace via
+# `podman secret` (type=env), si le secret existe. Format par entrée :
+# "nom-du-secret:VARIABLE_ENV". Absent -> repli sur .env (--env-file).
+# Création : printf '%s' 'ghp_...' | podman secret create copilot-gh-token -
+SECRETS=(
+    "copilot-gh-token:GH_TOKEN"
+)
+
 proxy_url() {
     if [ "$GATEWAY_ADDR_MODE" = "static" ]; then
         echo "http://${GATEWAY_IP}:3128"

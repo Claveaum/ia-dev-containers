@@ -27,6 +27,14 @@ WORKSPACE_VOLUME="mistral-vibe-workspace"
 LOCAL_VOLUME="mistral-vibe-local"
 CACHE_VOLUME="mistral-vibe-cache"
 
+# Secrets exposés en variable d'environnement dans le workspace via
+# `podman secret` (type=env), si le secret existe. Format par entrée :
+# "nom-du-secret:VARIABLE_ENV". Absent -> repli sur .env (--env-file).
+# Création : printf '%s' 'sk-...' | podman secret create mistral-vibe-mistral-api-key -
+SECRETS=(
+    "mistral-vibe-mistral-api-key:MISTRAL_API_KEY"
+)
+
 proxy_url() {
     if [ "$GATEWAY_ADDR_MODE" = "static" ]; then
         echo "http://${GATEWAY_IP}:3128"

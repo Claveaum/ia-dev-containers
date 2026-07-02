@@ -145,7 +145,7 @@ Voir le [README Copilot](clients/copilot/README.md) pour l'authentification et l
 | **Isolation filesystem** | Lecture seule | `--read-only` + tmpfs sur les deux conteneurs |
 | **Capacités** | `--cap-drop=ALL` sur les deux conteneurs | capacités ajoutées seulement temporairement sur le gateway durci |
 | **Installation de dépendances** | `pip install --user` sans sudo | `workspace` |
-| **Secrets** | `--env-file .env` (jamais `-e CLE=valeur`) | voir `.env.example` |
+| **Secrets** | `podman secret` (type=env), repli `--env-file .env` | `run.sh secrets` pour le statut ; jamais `-e CLE=valeur` |
 | **Audit** | Tests automatiques exécutés contre le vrai gateway | `run.sh test` / `security-tests.sh` |
 
 ---
@@ -212,7 +212,7 @@ Ajoutez-le à `clients/mistral-vibe/gateway/config/allowed-urls.txt`, puis recon
 
 ## 🎓 **Bonnes pratiques**
 
-1. **Secrets** : copiez `clients/mistral-vibe/.env.example` vers `.env` (ignoré par git), jamais de `-e CLE=valeur` sur la ligne de commande.
+1. **Secrets** : `podman secret create <nom> -` plutôt que `.env` (`.env` reste un repli valide) — le gain vérifié est que la valeur n'apparaît jamais dans `podman inspect`, ce n'est pas un chiffrement au repos. Jamais de `-e CLE=valeur` sur la ligne de commande. `./scripts/run.sh secrets` affiche le statut.
 2. **Mettez à jour régulièrement** les images de base (`podman build --no-cache`).
 3. **Ne contournez jamais le gateway** : c'est la seule protection contre l'exfiltration. Pour un nouveau besoin réseau, ajoutez le domaine à l'allowlist plutôt que de désactiver le filtrage.
 4. **Utilisez `GATEWAY_HARDENED=1`** dès que possible : la Phase durcie apporte une défense en profondeur (nftables) au cas où l'allowlist applicative serait un jour contournée.

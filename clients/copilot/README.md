@@ -42,6 +42,8 @@ Mêmes sous-commandes et variables d'environnement que mistral-vibe (`up|shell|t
 1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code.
 2. Ouvrir `clients/copilot` dans VS Code, extension **Remote - Containers**, `F1` → *Reopen in Container*.
 
+> ℹ️ `devcontainer.json` n'utilise pas `--secret` (voir [note équivalente côté mistral-vibe](../mistral-vibe/README.md#avec-vs-code)) : créez le `podman secret` au préalable dans un terminal, ou utilisez `.env`.
+
 ---
 
 ## 🔧 **Installation de GitHub Copilot CLI**
@@ -58,7 +60,14 @@ copilot --version
 
 Par défaut, `@github/copilot` s'authentifie via device flow interactif (URL + code affichés dans le terminal, à valider sur `github.com/login/device` — déjà couvert par l'allowlist). Le token obtenu ne survit pas à l'arrêt du conteneur (`--rm`), il faudra se réauthentifier à chaque session sauf si vous le persistez vous-même (volume dédié à l'endroit où le CLI stocke ses credentials).
 
-Alternative non interactive : copier `.env.example` vers `.env` et renseigner un token d'accès personnel (voir `.env.example` pour le détail) — chargé automatiquement par `run.sh` via `--env-file`, jamais en clair sur la ligne de commande.
+Alternative non interactive : un token d'accès personnel (PAT), **méthode recommandée : `podman secret`**
+```bash
+printf '%s' 'ghp_...' | podman secret create copilot-gh-token -
+./scripts/run.sh secrets   # vérifie que c'est bien pris en compte
+```
+`run.sh` détecte automatiquement ce secret et l'injecte en variable d'environnement (`GH_TOKEN`) dans le workspace. Gain **vérifié** par rapport à `.env`/`-e` : la valeur n'apparaît jamais dans `podman inspect` (testé). Ce n'est pas un chiffrement au repos et ça ne protège pas la valeur contre le CLI IA lui-même — voir le détail dans le [README mistral-vibe](../mistral-vibe/README.md#-secrets-clé-api-mistral-etc), identique ici.
+
+Repli : copier `.env.example` vers `.env` et renseigner `GH_TOKEN` — chargé via `--env-file` si aucun `podman secret` du même nom n'existe (le secret est prioritaire en cas de doublon).
 
 ---
 

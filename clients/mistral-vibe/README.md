@@ -54,6 +54,8 @@ GATEWAY_HARDENED=1 ./scripts/run.sh test
 1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (le devcontainer n'orchestre que le `workspace`, pas le `gateway` ni le réseau).
 2. Ouvrir `clients/mistral-vibe` dans VS Code, extension **Remote - Containers**, `F1` → *Reopen in Container*.
 
+> ℹ️ `devcontainer.json` n'utilise pas `--secret` (un `runArg` statique casserait le démarrage si le secret n'existe pas encore). Pour les secrets sous VS Code : créez le `podman secret` au préalable dans un terminal (il persiste indépendamment du conteneur), ou utilisez `.env`.
+
 ---
 
 ## 🔧 **Installation de Mistral Vibe CLI**
@@ -71,13 +73,21 @@ mistral-vibe --version
 
 ## 🔑 **Secrets (clé API Mistral, etc.)**
 
+**Méthode recommandée : `podman secret`**
+```bash
+printf '%s' 'sk-...' | podman secret create mistral-vibe-mistral-api-key -
+./scripts/run.sh secrets   # vérifie que c'est bien pris en compte
+```
+
+`run.sh` détecte automatiquement les secrets `podman` existants (voir `scripts/lib.sh` : `SECRETS`) et les injecte en variable d'environnement (`type=env`) dans le workspace. Gain **vérifié** par rapport à `.env`/`-e` : la valeur n'apparaît jamais dans `podman inspect` (testé : `-e`/`--env-file` l'affichent en clair, `podman secret` affiche `nom-du-secret=*******`). Ce n'est **pas** un chiffrement au repos (le driver par défaut `file` stocke en clair, comme un `.env` en `chmod 600`) et ça ne protège pas la valeur contre le CLI IA lui-même, qui doit la lire pour fonctionner — seulement contre son exposition accidentelle dans `podman inspect`, les logs, un partage d'écran ou un rapport de bug.
+
+**Repli : `.env`** (si vous préférez, ou pour compléter un secret non couvert)
 ```bash
 cp .env.example .env
 chmod 600 .env
 # éditer .env, renseigner MISTRAL_API_KEY
 ```
-
-`run.sh` charge automatiquement `.env` via `--env-file` s'il existe — jamais via `-e CLE=valeur`, qui serait visible dans `podman inspect` et dans la liste des process de l'hôte. `.env` est ignoré par git.
+`run.sh` charge `.env` via `--env-file` s'il existe et si aucun `podman secret` du même nom n'est défini (le secret est prioritaire en cas de doublon). `.env` est ignoré par git, mais sa valeur reste visible en clair dans `podman inspect` — contrairement à `podman secret`.
 
 ---
 

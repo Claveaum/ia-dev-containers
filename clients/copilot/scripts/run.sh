@@ -9,6 +9,7 @@ set -euo pipefail
 #   run.sh shell [-- CMD...]     lance (ou réutilise) le gateway puis un workspace interactif
 #   run.sh test                  lance le workspace et exécute security-tests.sh
 #   run.sh down [--purge-network] arrête les conteneurs (et supprime le réseau)
+#   run.sh secrets                affiche le statut des secrets attendus (voir lib.sh: SECRETS)
 #
 # Variables d'environnement :
 #   GATEWAY_HARDENED=1     active la Phase 2 (nftables + abandon de privilèges)
@@ -79,11 +80,47 @@ start_gateway() {
     echo "✅ Gateway démarré ($GATEWAY_CONTAINER)"
 }
 
+# Construit les --secret pour chaque entrée de SECRETS (lib.sh) dont le
+# `podman secret` correspondant existe déjà. Les secrets absents sont
+# silencieusement ignorés (pas une erreur : optionnel/incrémental).
+secret_args() {
+    local secret_entry secret_name var_name
+    for secret_entry in "${SECRETS[@]}"; do
+        secret_name="${secret_entry%%:*}"
+        var_name="${secret_entry#*:}"
+        if podman secret exists "$secret_name" 2>/dev/null; then
+            echo "--secret"
+            echo "${secret_name},type=env,target=${var_name}"
+        fi
+    done
+}
+
+# Affiche, pour chaque secret attendu par ce client, s'il est couvert par
+# `podman secret` (recommandé) ou par .env (repli), ou absent des deux.
+list_secrets() {
+    local secret_entry secret_name var_name
+    echo "Secrets attendus pour ce client :"
+    for secret_entry in "${SECRETS[@]}"; do
+        secret_name="${secret_entry%%:*}"
+        var_name="${secret_entry#*:}"
+        if podman secret exists "$secret_name" 2>/dev/null; then
+            echo "  $var_name : ✅ défini (podman secret '$secret_name')"
+        elif [ -f "$CLIENT_ROOT/.env" ] && grep -q "^${var_name}=" "$CLIENT_ROOT/.env" 2>/dev/null; then
+            echo "  $var_name : ✅ défini (.env, repli — la valeur apparaît en clair dans 'podman inspect')"
+        else
+            echo "  $var_name : ❌ absent — printf '%s' 'valeur' | podman secret create $secret_name -"
+        fi
+    done
+}
+
 start_workspace() {
     local proxy; proxy="$(proxy_url)"
     local env_file="$CLIENT_ROOT/.env"
     local env_args=()
     [ -f "$env_file" ] && env_args+=(--env-file "$env_file")
+
+    local secret_args_list=()
+    mapfile -t secret_args_list < <(secret_args)
 
     podman run --rm -it --name "$WORKSPACE_CONTAINER" \
         --user "$(id -u):$(id -g)" --userns=keep-id \
@@ -96,6 +133,7 @@ start_workspace() {
         -v "${CACHE_VOLUME}:/home/devuser/.cache" \
         -e HTTP_PROXY="$proxy" -e HTTPS_PROXY="$proxy" \
         -e IA_CLIENT=copilot \
+        "${secret_args_list[@]}" \
         "${env_args[@]}" \
         "$WORKSPACE_IMAGE" "$@"
 }
@@ -132,8 +170,12 @@ case "$cmd" in
         fi
         echo "✅ Conteneurs arrêtés."
         ;;
+    secrets)
+        need_podman
+        list_secrets
+        ;;
     *)
-        echo "usage: run.sh {up|shell [-- CMD...]|test|down [--purge-network]}" >&2
+        echo "usage: run.sh {up|shell [-- CMD...]|test|down [--purge-network]|secrets}" >&2
         exit 1
         ;;
 esac
