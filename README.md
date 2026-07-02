@@ -277,10 +277,35 @@ puis `podman machine stop && podman machine start`.
 
 ---
 
+### Réseau d'entreprise avec inspection TLS (proxy corporate)
+
+**Symptôme** : `podman build`/`podman pull` échouent avec une erreur de certificat, ou `apk add`/`pip install`/`npm install`/`git clone https://...` échouent dans le conteneur `workspace` avec une erreur TLS (`certificate verify failed`, `SSL certificate problem`), alors que `./scripts/run.sh shell -- curl -x http://gateway:3128 https://github.com` (voir plus haut) échoue aussi.
+
+**Cause** : un équipement réseau d'entreprise intercepte le TLS sortant (port 443) et présente un certificat signé par une CA interne à la place du vrai certificat du serveur. Squid (`gateway`) ne fait que relayer le `CONNECT` sans déchiffrer (pas de `ssl-bump` dans `gateway-base/config/squid.conf`) : c'est donc le magasin de confiance **à l'intérieur** du conteneur `workspace` (où le TLS se termine réellement, côté `git`/`curl`/`pip`/`npm`) qui doit connaître la CA d'entreprise — pas seulement celui de l'hôte.
+
+**Résolution en deux temps** :
+
+1. **Hôte / VM `podman machine`** (prérequis — sinon `podman build`/`pull` échouent avant même d'atteindre un Dockerfile de ce projet) :
+   - Linux natif : `/etc/pki/ca-trust/source/anchors/` + `update-ca-trust extract` (Fedora/RHEL), ou `/usr/local/share/ca-certificates/` + `update-ca-certificates` (Debian/Ubuntu).
+   - macOS/Windows (`podman machine`) : la CA doit être installée **dans la VM**, pas sur l'hôte — `podman machine ssh`, puis même procédure que Linux natif ci-dessus. ⚠️ Non persistant : `podman machine rm`/`init` recrée une VM vierge, il faut la réinstaller après. Voir [docs/macos.md](docs/macos.md) / [docs/windows.md](docs/windows.md).
+
+2. **Images du projet** : déposez le certificat de la CA d'entreprise (format PEM, extension `.crt`) dans `gateway-base/certs/` **et** `workspace-base/certs/` (dossiers vides par défaut, ignorés par git — voir `.gitignore`), puis forcez un rebuild sans cache (`build_images()` dans `clients/*/scripts/run.sh` ne reconstruit pas si le tag existe déjà) :
+   ```bash
+   podman build --no-cache -t ia-dev-containers-gateway-base:latest   gateway-base/
+   podman build --no-cache -t ia-dev-containers-workspace-base:latest workspace-base/
+   ```
+   Vérification : `podman run --rm --user 1000:1000 ia-dev-containers-workspace-base:latest grep -c 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt` doit afficher un compte supérieur à celui obtenu sans le fichier déposé.
+
+**Cas non couvert** : si le réseau exige en plus un **proxy HTTP(S) explicite obligatoire** pour toute sortie (le gateway ne peut pas joindre internet directement, même avec la CA en place), il faudrait chaîner Squid vers ce proxy amont (`cache_peer` dans `gateway-base/config/squid.conf`) — non implémenté ici, à traiter séparément si besoin confirmé.
+
+**Registre privé/auto-signé** (non applicable aujourd'hui — le projet ne pull que depuis Docker Hub public) : Podman a son propre mécanisme, indépendant de ce qui précède — `/etc/containers/certs.d/<host[:port]>/ca.crt` (rootful) ou `~/.config/containers/certs.d/<host[:port]>/ca.crt` (rootless).
+
+---
+
 ## 🎓 **Bonnes pratiques**
 
 1. **Secrets** : `podman secret create <nom> -` plutôt que `.env` (`.env` reste un repli valide) — le gain vérifié est que la valeur n'apparaît jamais dans `podman inspect`, ce n'est pas un chiffrement au repos. Jamais de `-e CLE=valeur` sur la ligne de commande. `./scripts/run.sh secrets` affiche le statut.
-2. **Mettez à jour régulièrement** les images de base (`podman build --no-cache`).
+2. **Mettez à jour régulièrement** les images de base (`podman build --no-cache`). Toute modification de `gateway-base/certs/` ou `workspace-base/certs/` (CA d'entreprise, voir [Dépannage](#réseau-dentreprise-avec-inspection-tls-proxy-corporate)) nécessite le même rebuild forcé.
 3. **Ne contournez jamais le gateway** : c'est la seule protection contre l'exfiltration. Pour un nouveau besoin réseau, ajoutez le domaine à l'allowlist plutôt que de désactiver le filtrage.
 4. **Utilisez `GATEWAY_HARDENED=1`** dès que possible : la Phase durcie apporte une défense en profondeur (nftables) au cas où l'allowlist applicative serait un jour contournée.
 

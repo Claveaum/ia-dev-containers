@@ -2,7 +2,8 @@
 # IA Dev Containers - Workspace (image de base, générique)
 #
 # Rôle : exécute le CLI IA (non fiable). Aucun accès réseau direct - attaché
-# uniquement au réseau interne ia-gw-internal, ne peut joindre que le gateway.
+# uniquement au réseau interne dédié au projet (scopé par client+projet, voir
+# clients/*/scripts/lib.sh), ne peut joindre que le gateway.
 # Pas de squid/iptables ici : le filtrage réseau vit entièrement dans le
 # conteneur gateway (voir gateway-base/, resté en 3.20 - aucune dépendance
 # Node côté gateway, pas de raison de faire bouger un composant audité).
@@ -12,12 +13,25 @@
 # =============================================================================
 FROM alpine:3.21
 
+# --- Confiance CA d'entreprise (optionnelle), partie 1/2 ---
+# Ajout "à la main" AVANT tout apk : sur un réseau qui intercepte le TLS
+# (proxy corporate), apk lui-même (dépôts https://dl-cdn.alpinelinux.org)
+# doit déjà faire confiance à la CA d'entreprise pour son propre
+# `apk update`. ca-certificates-bundle est déjà présent dans l'image de
+# base (vérifié), donc `cat` (busybox) suffit ici, pas besoin d'apk avant
+# ce point. certs/ est vide par défaut (.gitkeep) -> `find` ne matche rien
+# -> no-op strict pour qui n'a pas de CA d'entreprise à ajouter.
+COPY certs/ /usr/local/share/ca-certificates/
+RUN find /usr/local/share/ca-certificates -maxdepth 1 -name '*.crt' -exec cat {} + \
+        >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+
 ARG USERNAME=devuser
 ARG USER_UID=1000
 ARG USER_GID=1000
 
 RUN apk update && apk upgrade && \
     apk add --no-cache \
+        ca-certificates \
         bash \
         coreutils \
         findutils \
@@ -26,6 +40,14 @@ RUN apk update && apk upgrade && \
         openssh-client \
         sudo \
         && rm -rf /var/cache/apk/*
+
+# --- Confiance CA d'entreprise, partie 2/2 ---
+# apk upgrade peut avoir régénéré /etc/ssl/certs/ca-certificates.crt depuis
+# le seul contenu du paquet ca-certificates-bundle, effaçant l'ajout
+# ci-dessus. update-ca-certificates relit /usr/local/share/ca-certificates/
+# (déjà rempli par le COPY) et régénère le bundle proprement -> idempotent,
+# no-op strict si certs/ est vide.
+RUN update-ca-certificates
 
 RUN addgroup -g ${USER_GID} ${USERNAME} && \
     adduser -D -u ${USER_UID} -G ${USERNAME} -s /bin/bash ${USERNAME} && \
@@ -62,11 +84,26 @@ ENV IA_CLIENT=unknown
 # clients/*/scripts/run.sh (proxy_url() dans lib.sh).
 ENV NO_PROXY=localhost,127.0.0.1
 
+# Certains outils ignorent le magasin système par défaut (CA vendorisée) :
+# pointer explicitement vers /etc/ssl/certs/ca-certificates.crt les rend
+# cohérents avec lui. Sans CA d'entreprise ajoutée (voir certs/ plus haut),
+# ce fichier contient exactement le même jeu de CA publiques qu'avant ->
+# aucun changement de comportement pour le cas par défaut.
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt
+
 WORKDIR /workspace
-# WORKDIR crée /workspace en root (aucun USER actif à ce stade). Un volume
-# nommé est initialisé, à sa création, avec le contenu/propriétaire du
-# répertoire de l'image à ce chemin - sans ce chown, le volume serait
-# root:root et devuser ne pourrait pas y écrire au runtime.
+# WORKDIR crée /workspace en root (aucun USER actif à ce stade). Les deux
+# clients actuels (clients/*/scripts/run.sh) montent toujours PROJECT_ROOT en
+# bind-mount sur /workspace au runtime, qui prend le pas sur ce VOLUME — ce
+# chown/VOLUME ne sert donc plus de chemin normal aujourd'hui. Conservé comme
+# repli inoffensif : si /workspace est un jour lancé sans bind-mount explicite
+# (usage manuel, futur client), Podman initialise alors un volume nommé vide
+# avec le contenu/propriétaire de l'image à ce chemin, et sans ce chown le
+# volume serait root:root, illisible en écriture par devuser au runtime.
 RUN chown ${USERNAME}:${USERNAME} /workspace
 VOLUME /workspace
 

@@ -5,3 +5,13 @@ clients/*/.env
 # devcontainer.json.template : dépend de PROJECT_ROOT/PROJECT_NAME, propre
 # à chaque copie de ia-dev-containers, ne doit pas être commité.
 clients/*/.devcontainer/devcontainer.json
+
+# CA d'entreprise déposée localement pour un réseau à inspection TLS (voir
+# README, section "Réseau d'entreprise avec inspection TLS") : spécifique à
+# la machine de chaque développeur, jamais commitée. Les dossiers certs/
+# eux-mêmes restent trackés (.gitkeep) pour que le COPY du Dockerfile ne
+# puisse jamais échouer.
+gateway-base/certs/*.crt
+gateway-base/certs/*.pem
+workspace-base/certs/*.crt
+workspace-base/certs/*.pem

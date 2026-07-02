@@ -7,9 +7,29 @@
 # =============================================================================
 FROM alpine:3.20
 
+# --- Confiance CA d'entreprise (optionnelle), partie 1/2 ---
+# Ajout "à la main" AVANT tout apk : sur un réseau qui intercepte le TLS
+# (proxy corporate), apk lui-même (dépôts https://dl-cdn.alpinelinux.org)
+# doit déjà faire confiance à la CA d'entreprise pour son propre
+# `apk update`. ca-certificates-bundle est déjà présent dans l'image de
+# base (vérifié), donc `cat` (busybox) suffit ici, pas besoin d'apk avant
+# ce point. certs/ est vide par défaut (.gitkeep) -> `find` ne matche rien
+# -> no-op strict pour qui n'a pas de CA d'entreprise à ajouter.
+COPY certs/ /usr/local/share/ca-certificates/
+RUN find /usr/local/share/ca-certificates -maxdepth 1 -name '*.crt' -exec cat {} + \
+        >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+
 RUN apk update && apk upgrade && \
-    apk add --no-cache squid nftables su-exec curl && \
+    apk add --no-cache ca-certificates squid nftables su-exec curl && \
     rm -rf /var/cache/apk/*
+
+# --- Confiance CA d'entreprise, partie 2/2 ---
+# apk upgrade peut avoir régénéré /etc/ssl/certs/ca-certificates.crt depuis
+# le seul contenu du paquet ca-certificates-bundle, effaçant l'ajout
+# ci-dessus. update-ca-certificates relit /usr/local/share/ca-certificates/
+# (déjà rempli par le COPY) et régénère le bundle proprement -> idempotent,
+# no-op strict si certs/ est vide.
+RUN update-ca-certificates
 
 # nobody:nobody existe déjà normalement dans Alpine, mais on le garantit
 # explicitement plutôt que de supposer qu'il est présent.
