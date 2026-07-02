@@ -1,0 +1,43 @@
+#!/usr/sbin/nft -f
+# =============================================================================
+# Règles d'egress du gateway lui-même (défense en profondeur, phase durcie).
+# Chargées par entrypoint.sh via `nft -f`, requiert NET_ADMIN+NET_RAW.
+# =============================================================================
+flush ruleset
+
+table inet gateway_egress {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        ct state established,related accept
+        iif "lo" accept
+        # Doit correspondre au SUBNET de clients/*/scripts/lib.sh.
+        ip saddr 10.89.0.0/24 tcp dport 3128 accept
+        icmp type echo-request accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+        # Volontairement vide : Squid termine les connexions en couche 7 et
+        # ouvre ses propres sockets sortants. Il ne doit JAMAIS agir comme
+        # routeur/NAT entre son interface interne et son interface externe -
+        # sinon l'allowlist applicative peut être contournée en L3.
+    }
+
+    chain output {
+        type filter hook output priority 0; policy drop;
+        ct state established,related accept
+        oif "lo" accept
+
+        # DNS avant le blocage RFC1918 : le résolveur peut être en RFC1918.
+        udp dport 53 accept
+        tcp dport 53 accept
+
+        # Métadonnées cloud / link-local - à bloquer avant l'autorisation 80/443.
+        ip daddr 169.254.0.0/16 drop
+
+        # RFC1918 (sauf retour déjà couvert par ct established,related ci-dessus).
+        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } drop
+
+        tcp dport { 80, 443 } accept
+    }
+}
