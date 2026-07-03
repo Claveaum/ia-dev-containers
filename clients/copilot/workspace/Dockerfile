@@ -38,8 +38,15 @@ COPY clients/copilot/scripts/lib.sh /lib.sh
 RUN mkdir -p /home/devuser/.npm-global/lib /home/devuser/.npm-global/bin \
     && chown -R devuser:devuser /home/devuser/.npm-global
 
+# ~/.copilot (session, jeton d'auth après /login, logs de @github/copilot) :
+# même piège de volume nommé root:root que ci-dessus si ce répertoire
+# n'existe pas déjà, chowné, dans l'image avant le premier mount.
+RUN mkdir -p /home/devuser/.copilot \
+    && chown -R devuser:devuser /home/devuser/.copilot
+
 VOLUME /home/devuser/.npm-global
 VOLUME /home/devuser/.cache
+VOLUME /home/devuser/.copilot
 
 # Doit rester la dernière instruction (cf. workspace-base/Dockerfile).
 USER devuser

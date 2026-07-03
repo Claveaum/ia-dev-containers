@@ -39,7 +39,7 @@ cd ia-dev-containers/clients/mistral-vibe   # ou clients/copilot
 
 Ce projet copie `ia-dev-containers` à la racine du projet à sandboxer et monte cette racine directement dans `/workspace` (bind-mount, pas un volume Podman vide) : le CLI IA travaille sur les vrais fichiers. C'est le point le plus susceptible de révéler un écart macOS-spécifique, et **rien ici n'a été vérifié sur matériel réel** : un bind-mount hôte↔VM sur macOS traverse `virtiofs` (ou `9p` selon le provider), une couche de partage de fichiers où les décalages d'UID/GID entre l'utilisateur macOS (souvent UID 501) et l'utilisateur à l'intérieur de la VM sont une source connue de problèmes de permissions. `--userns=keep-id` (déjà utilisé) atténue ça sur Linux natif ; son comportement à travers virtiofs n'est pas documenté et fait partie de la check-list ci-dessous.
 
-`~/.local` (ou `~/.npm-global` pour Copilot) et `~/.cache` restent, eux, des **volumes Podman nommés** (jamais des bind-mounts) : leur stockage vit entièrement à l'intérieur du disque de la VM `podman machine`, sans traverser virtiofs/9p — ils ne sont pas concernés par ce risque.
+`~/.local` (ou `~/.npm-global` pour Copilot), `~/.cache` et `~/.copilot` (Copilot uniquement — session, jeton d'auth) restent, eux, des **volumes Podman nommés** (jamais des bind-mounts) : leur stockage vit entièrement à l'intérieur du disque de la VM `podman machine`, sans traverser virtiofs/9p — ils ne sont pas concernés par ce risque.
 
 ## Compatibilité bash des scripts `run.sh`
 

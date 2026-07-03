@@ -119,6 +119,20 @@ else
     fail "Impossible d'écrire dans $pkg_display !"
 fi
 
+# EXTRA_VOLUMES (lib.sh) : optionnel, un test d'écriture par entrée — vide
+# pour un client qui n'a pas d'état à persister hors PKG_VOLUME_TARGET
+# (ex. mistral-vibe).
+for extra_entry in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
+    extra_target="${extra_entry%%:*}"
+    extra_display="~${extra_target#/home/devuser}"
+    if touch "${extra_target}/test-security" 2>/dev/null; then
+        pass "$extra_display est accessible en écriture (état persistant du CLI)"
+        rm -f "${extra_target}/test-security"
+    else
+        fail "Impossible d'écrire dans $extra_display !"
+    fi
+done
+
 # =============================================================================
 # 3. Isolation réseau — les 3 vérifications non négociables du redesign
 # =============================================================================

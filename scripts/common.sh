@@ -50,6 +50,36 @@ CACHE_VOLUME="${CLIENT_NAME}-cache"
 # orpheliner les volumes déjà installés d'un utilisateur existant.
 PKG_VOLUME="${CLIENT_NAME}-$(basename "$PKG_VOLUME_TARGET" | sed -e 's/^\.//')-${PROJECT_NAME}"
 
+# Volumes optionnels supplémentaires pour l'état persistant d'un CLI (ex.
+# ~/.copilot : session, jeton d'auth, logs) quand il écrit ailleurs que
+# PKG_VOLUME_TARGET — déclarés par l'adaptateur (lib.sh) via EXTRA_VOLUMES,
+# un tableau de "chemin-cible:jeton-devcontainer" (même idiome que SECRETS
+# pour "secret:VARIABLE_ENV"). Vide par défaut (mistral-vibe aujourd'hui,
+# aucun besoin) — un client peut en déclarer autant qu'il lui faut. Le repli
+# `${EXTRA_VOLUMES[@]+...}` gère aussi bien un tableau vide qu'un tableau
+# jamais déclaré par lib.sh (bash 3.2/set -u, même piège que
+# _collect_arg_lines ci-dessous).
+EXTRA_VOLUMES=(${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"})
+
+# Nom du volume Podman pour une entrée de EXTRA_VOLUMES (chemin cible
+# uniquement, avant le ":"), dérivé comme PKG_VOLUME : CLIENT_NAME + dernier
+# segment du chemin, scopé par projet — un jeton d'auth compromis dans un
+# projet ne doit pas être silencieusement réutilisable depuis un autre.
+_extra_volume_name() {
+    printf '%s-%s-%s' "$CLIENT_NAME" "$(basename "$1" | sed -e 's/^\.//')" "$PROJECT_NAME"
+}
+
+# Arguments `-v` pour chaque entrée de EXTRA_VOLUMES, une ligne par argument
+# (même idiome que self_protect_mount_arg()/secret_args(), consommé via
+# _collect_arg_lines()) — rien du tout si EXTRA_VOLUMES est vide.
+extra_volume_mount_args() {
+    local entry target
+    for entry in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
+        target="${entry%%:*}"
+        printf -- '-v\n%s:%s\n' "$(_extra_volume_name "$target")" "$target"
+    done
+}
+
 # dns   : le workspace joint le gateway via son alias réseau "gateway"
 #         (résolu par aardvark-dns sur le réseau interne).
 # static: repli sur l'IP fixe du gateway, si la résolution DNS pose problème.

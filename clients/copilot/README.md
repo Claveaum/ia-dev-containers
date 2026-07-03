@@ -16,7 +16,7 @@ Réseau interne dédié, scopé par (client, projet) — distinct de celui de mi
 
 ## ⚠️ **Ce qui est vérifié, et ce qui ne l'est pas**
 
-Ce client a été validé pour les mêmes propriétés mécaniques que mistral-vibe : isolation réseau (aucune route directe), allowlist de domaines fonctionnelle (y compris le matching de sous-domaines `*.githubcopilot.com`), non-root, filesystem en lecture seule, `npm install -g` fonctionnel dans `~/.npm-global`.
+Ce client a été validé pour les mêmes propriétés mécaniques que mistral-vibe : isolation réseau (aucune route directe), allowlist de domaines fonctionnelle (y compris le matching de sous-domaines `*.githubcopilot.com`), non-root, filesystem en lecture seule, `npm install -g` fonctionnel dans `~/.npm-global`. Le CLI `copilot` a aussi été vérifié capable de démarrer et d'initialiser son état (`~/.copilot`, volume dédié — voir plus bas) sans authentification réelle : sans ce volume, il quittait silencieusement (aucune sortie, code 1) dès le premier lancement, faute de pouvoir écrire sous `$HOME` en lecture seule.
 
 **Non testé ici** : une session Copilot CLI authentifiée de bout en bout (nécessite un abonnement GitHub Copilot actif et des identifiants réels, indisponibles dans cet environnement de développement). Si un domaine nécessaire à l'authentification ou à l'usage réel manque à l'allowlist, ajoutez-le à `gateway/config/allowed-urls.txt` (voir la section Dépannage).
 

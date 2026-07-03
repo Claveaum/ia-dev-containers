@@ -62,6 +62,19 @@ render_devcontainer() {
     if [ -n "$self_protect_relpath" ]; then
         self_protect_line="\"source=${REPO_ROOT},target=/workspace/${self_protect_relpath},type=bind,readonly\","
     fi
+    # Une entrée de sed -e par élément de EXTRA_VOLUMES (scripts/common.sh),
+    # chacune substituant le jeton propre à cette entrée (déclaré par
+    # l'adaptateur, ex. "__COPILOT_STATE_VOLUME__") par son entrée mounts[]
+    # — tableau vide (donc aucune substitution) si le client n'en déclare
+    # pas, comme mistral-vibe aujourd'hui.
+    local extra_volume_sed_args=()
+    local extra_entry extra_target extra_placeholder extra_line
+    for extra_entry in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
+        extra_target="${extra_entry%%:*}"
+        extra_placeholder="${extra_entry#*:}"
+        extra_line="\"source=$(_extra_volume_name "$extra_target"),target=${extra_target},type=volume\","
+        extra_volume_sed_args+=(-e "s|${extra_placeholder}|$(_sed_escape_replacement "$extra_line")|g")
+    done
     # PKG_VOLUME_PLACEHOLDER (ex. "__LOCAL_VOLUME__", "__NPM_GLOBAL_VOLUME__")
     # est un jeton fixe posé par l'adaptateur (lib.sh) : sûr à interpoler tel
     # quel dans le motif sed (aucun caractère spécial), contrairement à sa
@@ -85,6 +98,7 @@ render_devcontainer() {
         -e "s|__CACHE_VOLUME__|$(_sed_escape_replacement "$CACHE_VOLUME")|g" \
         -e "s|__PROXY_URL__|$(_sed_escape_replacement "$(proxy_url)")|g" \
         -e "s|__CLIENT_NAME__|$(_sed_escape_replacement "$CLIENT_NAME")|g" \
+        ${extra_volume_sed_args[@]+"${extra_volume_sed_args[@]}"} \
         "$template" > "$out"
 }
 
@@ -177,6 +191,12 @@ start_workspace() {
     _collect_arg_lines self_protect_mount_arg
     local self_mount_args=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
 
+    # EXTRA_VOLUMES (scripts/common.sh) : volumes persistants optionnels pour
+    # l'état du CLI (session, jeton d'auth) hors PKG_VOLUME_TARGET — vide
+    # pour un client qui n'en déclare pas (EXTRA_VOLUMES vide).
+    _collect_arg_lines extra_volume_mount_args
+    local extra_volume_args=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
+
     # WORKSPACE_SECURITY_ARGS (scripts/common.sh) : même contrat d'isolation
     # que .devcontainer/devcontainer.json.template (runArgs), généré depuis
     # cette même valeur par render_devcontainer() — voir le commentaire sur
@@ -189,6 +209,7 @@ start_workspace() {
         ${self_mount_args[@]+"${self_mount_args[@]}"} \
         -v "${PKG_VOLUME}:${PKG_VOLUME_TARGET}" \
         -v "${CACHE_VOLUME}:/home/devuser/.cache" \
+        ${extra_volume_args[@]+"${extra_volume_args[@]}"} \
         -e HTTP_PROXY="$proxy" -e HTTPS_PROXY="$proxy" \
         -e IA_CLIENT="$CLIENT_NAME" \
         ${secret_args_list[@]+"${secret_args_list[@]}"} \

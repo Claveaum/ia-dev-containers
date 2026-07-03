@@ -44,6 +44,13 @@
       "target": "/home/devuser/.npm-global",
       "type": "volume"
     },
+    // ~/.copilot (session, jeton d'auth après /login, logs) : sans ce
+    // volume, ce chemin reste sous le filesystem racine en lecture seule et
+    // le CLI plante en silence dès le premier lancement. Jeton déclaré par
+    // ce client dans scripts/lib.sh (EXTRA_VOLUMES), résolu par
+    // render_devcontainer() (scripts/orchestrator.sh) — même mécanisme que
+    // le mount d'auto-protection tout en haut de ce tableau.
+    __COPILOT_STATE_VOLUME__
     {
       "source": "__CACHE_VOLUME__",
       "target": "/home/devuser/.cache",
