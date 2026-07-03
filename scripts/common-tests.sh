@@ -105,6 +105,45 @@ assert_eq "relpath avec IA_SELF_MOUNT_RW=1" "" "$(_self_protect_relpath)"
 assert_eq "status avec IA_SELF_MOUNT_RW=1" "désactivée (IA_SELF_MOUNT_RW=1)" "$(self_protect_status)"
 unset IA_SELF_MOUNT_RW
 
+# --- render_devcontainer() contre les VRAIS templates, rendu isolé sous /tmp ---
+# Un __TOKEN__ ajouté à un template mais jamais câblé dans le sed de
+# render_devcontainer() survit silencieusement au rendu — la seule façon de
+# le remarquer jusqu'ici était de relire le JSON généré à la main après un
+# `run.sh up` complet (arrivé 4 fois cette session : self-mount, contrat
+# d'isolation, proxy, IA_CLIENT). Rendu contre une copie jetable du VRAI
+# template de chaque client (pas un fixture synthétique, qui ne verrait pas
+# un jeton oublié dans le vrai fichier) sous /tmp plutôt qu'en place : rendre
+# directement dans clients/<client>/.devcontainer/ écraserait le
+# devcontainer.json réellement généré par le dernier `run.sh up` de
+# l'utilisateur (fichier généré, non suivi par git, mais potentiellement
+# ouvert dans VS Code) avec des valeurs de test.
+# shellcheck source=orchestrator.sh
+source "$SCRIPT_DIR/orchestrator.sh"
+
+_render_devcontainer_orphans() {
+    local out="$1"
+    grep -oE '__[A-Z_]+__' "$out" 2>/dev/null | sort -u | tr '\n' ' ' | sed -e 's/ $//'
+}
+
+for _client in mistral-vibe copilot; do
+    _real_client_root="$SCRIPT_DIR/../clients/$_client"
+    _tmp_client_root="$(mktemp -d)"
+    mkdir -p "$_tmp_client_root/.devcontainer"
+    cp "$_real_client_root/.devcontainer/devcontainer.json.template" "$_tmp_client_root/.devcontainer/"
+
+    # shellcheck source=/dev/null
+    source "$_real_client_root/scripts/lib.sh"
+    CLIENT_ROOT="$_tmp_client_root"
+    GATEWAY_ADDR_MODE="dns"
+
+    render_devcontainer
+    _out="$_tmp_client_root/.devcontainer/devcontainer.json"
+    assert_eq "render_devcontainer ($_client) : fichier produit" "oui" "$([ -f "$_out" ] && echo oui || echo non)"
+    assert_eq "render_devcontainer ($_client) : aucun __TOKEN__ orphelin" "" "$(_render_devcontainer_orphans "$_out")"
+
+    rm -rf "$_tmp_client_root"
+done
+
 echo ""
 echo "Résultat : $PASS réussis, $FAIL échoués"
 [ "$FAIL" -eq 0 ]
