@@ -14,9 +14,6 @@ CLIENT_NAME="copilot"
 # (pas un simple cache). Le nom du volume Podman (PKG_VOLUME) est dérivé de
 # ce chemin par scripts/common.sh — ne pas le déclarer ici.
 PKG_VOLUME_TARGET="/home/devuser/.npm-global"
-# Jeton substitué dans .devcontainer/devcontainer.json.template par
-# render_devcontainer() (scripts/orchestrator.sh).
-PKG_VOLUME_PLACEHOLDER="__NPM_GLOBAL_VOLUME__"
 # Libellé utilisé dans le message de security-tests-common.sh (section 2).
 PKG_INSTALL_LABEL="npm install -g"
 
@@ -26,13 +23,39 @@ PKG_INSTALL_LABEL="npm install -g"
 # reste sous le filesystem racine en lecture seule et le CLI plante en
 # silence dès le premier lancement (repéré dans ce sandbox : `copilot`
 # quitte avec exit 1 sans aucune sortie tant que ~/.copilot n'est pas
-# inscriptible). Format "chemin-cible:jeton-devcontainer" (même idiome que
-# SECRETS ci-dessous) — consommé par scripts/common.sh (EXTRA_VOLUMES,
-# dérive un volume par entrée). Vide par défaut pour un client qui n'a pas
-# ce besoin (ex. mistral-vibe) ; un client peut en déclarer plusieurs.
+# inscriptible). Simple chemin cible par entrée (le mount, côté CLI comme
+# côté devcontainer.json, est entièrement dérivé par scripts/common.sh et
+# devcontainer_mounts_json() dans scripts/orchestrator.sh — aucun jeton à
+# déclarer ici). Vide par défaut pour un client qui n'a pas ce besoin (ex.
+# mistral-vibe) ; un client peut en déclarer plusieurs.
 EXTRA_VOLUMES=(
-    "/home/devuser/.copilot:__COPILOT_STATE_VOLUME__"
+    "/home/devuser/.copilot"
 )
+
+# Nom affiché dans devcontainer.json ("name", et repris dans le message de
+# postStartCommand) — voir scripts/devcontainer-skeleton.json.template,
+# partagé par tous les clients (render_devcontainer() dans
+# scripts/orchestrator.sh).
+DEVCONTAINER_DISPLAY_NAME="GitHub Copilot CLI"
+
+# Extensions VS Code proposées à l'ouverture de ce devcontainer (client
+# customizations.vscode.extensions, rendu en JSON par
+# devcontainer_extensions_json() dans scripts/orchestrator.sh).
+DEVCONTAINER_EXTENSIONS=(
+    "dbaeumer.vscode-eslint"
+    "esbenp.prettier-vscode"
+)
+
+# Réglages VS Code propres à ce client (customizations.vscode.settings) :
+# aucun au-delà du réglage générique déjà dans le squelette partagé
+# (scripts/devcontainer-skeleton.json.template) — vide, contrairement à
+# mistral-vibe qui en ajoute (voir son lib.sh).
+DEVCONTAINER_SETTINGS_JSON=""
+
+# Commande affichée dans le message de bienvenue (postStartCommand) du
+# devcontainer, pour installer le CLI lui-même (jamais fait au build, voir
+# workspace/Dockerfile).
+PKG_INSTALL_HINT="npm install -g @github/copilot"
 
 # Domaines vérifiés en section 3 de security-tests-common.sh :
 #   TEST_DOMAIN_PRIMARY   doit réussir, sinon échec dur (registre de paquets

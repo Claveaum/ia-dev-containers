@@ -60,7 +60,7 @@ GATEWAY_HARDENED=1 ./scripts/run.sh test
 
 ### **Avec VS Code**
 
-1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (le devcontainer n'orchestre que le `workspace`, pas le `gateway` ni le réseau ; `run.sh up` génère aussi `devcontainer.json` à partir de `devcontainer.json.template` — ne l'éditez pas directement, il est régénéré à chaque `up`).
+1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (le devcontainer n'orchestre que le `workspace`, pas le `gateway` ni le réseau ; `run.sh up` génère aussi `devcontainer.json`, à partir du squelette partagé `scripts/devcontainer-skeleton.json.template` + `scripts/lib.sh` — ne l'éditez pas directement, il est régénéré à chaque `up`).
 2. Ouvrir `clients/mistral-vibe` dans VS Code, extension **Remote - Containers**, `F1` → *Reopen in Container*.
 
 > ℹ️ `devcontainer.json` n'utilise pas `--secret` (un `runArg` statique casserait le démarrage si le secret n'existe pas encore). Pour les secrets sous VS Code : créez le `podman secret` au préalable dans un terminal (il persiste indépendamment du conteneur), ou utilisez `.env`.

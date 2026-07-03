@@ -45,6 +45,8 @@ unset IA_PROJECT_NAME IA_SELF_MOUNT_RW GATEWAY_ADDR_MODE GATEWAY_HARDENED 2>/dev
 
 # shellcheck source=common.sh
 source "$SCRIPT_DIR/common.sh"
+# shellcheck source=orchestrator.sh
+source "$SCRIPT_DIR/orchestrator.sh"
 
 # --- Gabarits de noms de ressources (dérivés de CLIENT_NAME/PROJECT_NAME) ---
 assert_eq "PROJECT_NAME dérivé du dossier" "mon-projet" "$PROJECT_NAME"
@@ -117,26 +119,28 @@ assert_eq "relpath avec IA_SELF_MOUNT_RW=1" "" "$(_self_protect_relpath)"
 assert_eq "status avec IA_SELF_MOUNT_RW=1" "désactivée (IA_SELF_MOUNT_RW=1)" "$(self_protect_status)"
 unset IA_SELF_MOUNT_RW
 
-# --- render_devcontainer() contre les VRAIS templates, rendu isolé sous /tmp ---
-# Un __TOKEN__ ajouté à un template mais jamais câblé dans le sed de
+# --- render_devcontainer() contre le VRAI squelette, rendu isolé sous /tmp ---
+# Un __TOKEN__ ajouté au squelette mais jamais câblé dans le sed de
 # render_devcontainer() survit silencieusement au rendu — la seule façon de
 # le remarquer jusqu'ici était de relire le JSON généré à la main après un
 # `run.sh up` complet (arrivé 4 fois cette session : self-mount, contrat
 # d'isolation, proxy, IA_CLIENT). Rendu contre une copie jetable du VRAI
-# template de chaque client (pas un fixture synthétique, qui ne verrait pas
-# un jeton oublié dans le vrai fichier) sous /tmp plutôt qu'en place : rendre
+# squelette partagé (pas un fixture synthétique, qui ne verrait pas un jeton
+# oublié dans le vrai fichier) sous /tmp plutôt qu'en place : rendre
 # directement dans clients/<client>/.devcontainer/ écraserait le
 # devcontainer.json réellement généré par le dernier `run.sh up` de
 # l'utilisateur (fichier généré, non suivi par git, mais potentiellement
-# ouvert dans VS Code) avec des valeurs de test.
+# ouvert dans VS Code) avec des valeurs de test. Le squelette est partagé
+# (scripts/devcontainer-skeleton.json.template), donc REPO_ROOT doit pointer
+# vers le vrai dépôt ici (render_devcontainer() le résout via
+# "$REPO_ROOT/scripts/...") — seul CLIENT_ROOT (sortie) est temporaire.
 #
 # _render_devcontainer_orphans() ne détecte qu'UNE forme de corruption (un
 # jeton oublié, encore visible tel quel). Une corruption qui mange une
 # virgule ou rate un échappement (voir _sed_escape_replacement) ne laisse
 # aucun jeton orphelin et passerait ce test silencieusement — d'où le
 # parseur JSON(C) ci-dessous, en complément, pas en remplacement.
-# shellcheck source=orchestrator.sh
-source "$SCRIPT_DIR/orchestrator.sh"
+REPO_ROOT="$SCRIPT_DIR/.."
 
 _render_devcontainer_orphans() {
     local out="$1"
@@ -177,11 +181,14 @@ _render_devcontainer_json_valid() {
 
 _json_parser="$(_json_parser_cmd)"
 
-for _client in mistral-vibe copilot; do
+# Découverte automatique plutôt qu'une liste codée en dur : un client ajouté
+# sans toucher ce fichier doit quand même être couvert par ce test (sinon
+# aucune régression de rendu ne serait détectée pour lui avant un vrai
+# `run.sh up`).
+for _client_dir in "$SCRIPT_DIR"/../clients/*/; do
+    _client="$(basename "$_client_dir")"
     _real_client_root="$SCRIPT_DIR/../clients/$_client"
     _tmp_client_root="$(mktemp -d)"
-    mkdir -p "$_tmp_client_root/.devcontainer"
-    cp "$_real_client_root/.devcontainer/devcontainer.json.template" "$_tmp_client_root/.devcontainer/"
 
     # shellcheck source=/dev/null
     source "$_real_client_root/scripts/lib.sh"

@@ -19,15 +19,16 @@ workspace-base/        # image générique workspace (CLI IA)
 scripts/                          # orchestrateur générique, partagé par tous les clients
   common.sh                       # gabarits de noms + auto-protection + _collect_arg_lines() (côté hôte)
   common-tests.sh                 # tests rapides sans Podman de common.sh
-  orchestrator.sh                 # up|shell|test|down|secrets|doctor — orchestrator_main()
+  orchestrator.sh                 # up|shell|test|down|secrets|doctor — orchestrator_main() ; aussi render_devcontainer() + ses helpers JSON (seul appelant)
   security-tests.sh               # batterie de tests générique (copiée dans l'image workspace, source /lib.sh)
+  devcontainer-skeleton.json.template  # squelette VS Code partagé par tous les clients, rendu par render_devcontainer()
 clients/<nom>/
   gateway/             # overlay : allowlist de domaines uniquement
   workspace/           # overlay : dépendances du client (Python, Node...) — COPY lib.sh + scripts/security-tests.sh au build
   scripts/
-    lib.sh             # adaptateur : CLIENT_NAME, volume de paquets, domaines testés, SECRETS, callback de test
+    lib.sh             # adaptateur : CLIENT_NAME, volume de paquets, domaines testés, SECRETS, callback de test, cosmétique VS Code (DEVCONTAINER_*)
     run.sh             # point d'entrée mince : source lib.sh + common.sh + orchestrator.sh
-  .devcontainer/devcontainer.json.template
+  .devcontainer/       # devcontainer.json généré au runtime (run.sh up) — pas de template ici, voir scripts/
   .env.example
 docs/agents/           # config lue par les skills d'ingénierie (voir plus bas)
 docs/{macos,windows}.md

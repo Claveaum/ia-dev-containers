@@ -49,43 +49,105 @@ build_images() {
     podman build -t "$WORKSPACE_IMAGE" -f "$CLIENT_ROOT/workspace/Dockerfile" "$REPO_ROOT"
 }
 
-# Génère .devcontainer/devcontainer.json à partir du template : les valeurs
-# (réseau scopé projet, chemin du projet, volume de paquets scopé projet) ne
-# peuvent pas être codées en dur, elles dépendent de PROJECT_ROOT/PROJECT_NAME.
-render_devcontainer() {
-    local template="$CLIENT_ROOT/.devcontainer/devcontainer.json.template"
-    local out="$CLIENT_ROOT/.devcontainer/devcontainer.json"
-    [ -f "$template" ] || return 0
-    # PROJECT_ROOT est un chemin hôte arbitraire (pas sanitizé comme
-    # NETWORK_NAME/PKG_VOLUME) : échappé via _sed_escape_replacement
-    # (scripts/common.sh) pour éviter qu'un "&" ou un "|" dans le chemin ne
-    # corrompe silencieusement le fichier généré ou ne fasse échouer ce sed.
-    # __SELF_PROTECT_MOUNT__ : entrée de mounts[] qui protège ia-dev-containers/
-    # en lecture seule (voir scripts/common.sh: self_protect_mount_arg()), ou
-    # chaîne vide si non applicable (relocalisé hors du projet, dogfooding, ou
-    # IA_SELF_MOUNT_RW=1) — la ligne du template disparaît alors simplement.
-    local self_protect_relpath self_protect_line=""
+# Échappe une valeur pour un usage sûr comme texte de remplacement dans
+# `sed 's|X|VALEUR|g'` : `&` (réinsère le texte matché) et `|` (le délimiteur
+# utilisé ici) doivent être échappés, ainsi que `\` lui-même. Sans ça, un
+# PROJECT_ROOT contenant l'un de ces caractères (ex: "AT&T Project", ou un
+# chemin avec un "|" littéral) corromprait silencieusement le fichier généré
+# ou ferait échouer `sed` en pleine commande `run.sh up`. Deuxième passe :
+# échappe aussi les retours à la ligne internes en `\<retour à la ligne>`,
+# seule syntaxe qu'accepte `sed -e "s|X|VALEUR|g"` pour un texte de
+# remplacement multi-lignes (ex. workspace_security_args_json() ci-dessous) —
+# no-op sur une valeur mono-ligne (rien à remplacer). Fait en bash pur
+# (`${var//motif/remplacement}`, bash 3.2-safe) plutôt qu'avec un deuxième
+# `sed` : l'idiome GNU sed `:a;N;$!ba;s/\n/\\\n/g` pour joindre les lignes
+# n'est pas portable sur BSD sed (macOS), qui interprète `:a;N;...` comme une
+# seule étiquette malformée plutôt que trois commandes distinctes.
+# Colocalisée ici (pas dans scripts/common.sh) : son unique appelante est
+# render_devcontainer() ci-dessous, comme les autres helpers de rendu JSON
+# qui suivent.
+_sed_escape_replacement() {
+    local escaped nl
+    escaped="$(printf '%s' "$1" | sed -e 's/[\&|]/\\&/g')"
+    nl=$'\n'
+    printf '%s' "${escaped//$nl/\\$nl}"
+}
+
+# WORKSPACE_SECURITY_ARGS (scripts/common.sh), un élément JSON par ligne
+# (avec virgule finale : toujours suivi d'au moins "--network=..." dans le
+# squelette). Passé par render_devcontainer() à _sed_escape_replacement(),
+# qui échappe aussi les retours à la ligne internes à cette valeur
+# multi-lignes.
+workspace_security_args_json() {
+    local arg
+    for arg in "${WORKSPACE_SECURITY_ARGS[@]}"; do
+        printf '    "%s",\n' "$arg"
+    done
+}
+
+# Génère le contenu de "mounts": [ ... ] pour render_devcontainer() — mêmes
+# volumes, même ordre que start_workspace() ci-dessous, depuis les mêmes
+# données (scripts/common.sh : _self_protect_relpath(), PKG_VOLUME,
+# EXTRA_VOLUMES, CACHE_VOLUME) : une seule source pour "quels volumes sont
+# montés", au lieu d'un JSON dupliqué à la main par client (la classe de bug
+# déjà rencontrée pour ~/.copilot — voir README, section Architecture).
+# CACHE_VOLUME reste toujours en dernier, sans virgule finale : seul élément
+# garanti systématiquement présent en dernière position, quel que soit
+# EXTRA_VOLUMES (vide ou non).
+devcontainer_mounts_json() {
+    local self_protect_relpath
     self_protect_relpath="$(_self_protect_relpath)"
     if [ -n "$self_protect_relpath" ]; then
-        self_protect_line="\"source=${REPO_ROOT},target=/workspace/${self_protect_relpath},type=bind,readonly\","
+        printf '    "source=%s,target=/workspace/%s,type=bind,readonly",\n' "$REPO_ROOT" "$self_protect_relpath"
     fi
-    # Une entrée de sed -e par élément de EXTRA_VOLUMES (scripts/common.sh),
-    # chacune substituant le jeton propre à cette entrée (déclaré par
-    # l'adaptateur, ex. "__COPILOT_STATE_VOLUME__") par son entrée mounts[]
-    # — tableau vide (donc aucune substitution) si le client n'en déclare
-    # pas, comme mistral-vibe aujourd'hui.
-    local extra_volume_sed_args=()
-    local extra_entry extra_target extra_placeholder extra_line
-    for extra_entry in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
-        extra_target="${extra_entry%%:*}"
-        extra_placeholder="${extra_entry#*:}"
-        extra_line="\"source=$(_extra_volume_name "$extra_target"),target=${extra_target},type=volume\","
-        extra_volume_sed_args+=(-e "s|${extra_placeholder}|$(_sed_escape_replacement "$extra_line")|g")
+    printf '    "source=%s,target=%s,type=volume",\n' "$PKG_VOLUME" "$PKG_VOLUME_TARGET"
+    local extra_target
+    for extra_target in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
+        printf '    "source=%s,target=%s,type=volume",\n' "$(_extra_volume_name "$extra_target")" "$extra_target"
     done
-    # PKG_VOLUME_PLACEHOLDER (ex. "__LOCAL_VOLUME__", "__NPM_GLOBAL_VOLUME__")
-    # est un jeton fixe posé par l'adaptateur (lib.sh) : sûr à interpoler tel
-    # quel dans le motif sed (aucun caractère spécial), contrairement à sa
-    # valeur de remplacement (PKG_VOLUME) qui passe par _sed_escape_replacement.
+    printf '    "source=%s,target=/home/devuser/.cache,type=volume"\n' "$CACHE_VOLUME"
+}
+
+# customizations.vscode.extensions (lib.sh: DEVCONTAINER_EXTENSIONS), sans
+# virgule finale sur le dernier élément (pas de ligne statique garantie
+# après, contrairement à workspace_security_args_json() ci-dessus) — virgule
+# en tête de chaque élément sauf le premier plutôt qu'en fin, pour ne pas
+# dépendre de la position dans la boucle.
+devcontainer_extensions_json() {
+    local ext first=1
+    for ext in "${DEVCONTAINER_EXTENSIONS[@]+"${DEVCONTAINER_EXTENSIONS[@]}"}"; do
+        if [ "$first" -eq 1 ]; then
+            printf '        "%s"' "$ext"
+            first=0
+        else
+            printf ',\n        "%s"' "$ext"
+        fi
+    done
+    printf '\n'
+}
+
+# Génère .devcontainer/devcontainer.json à partir du squelette partagé
+# (scripts/devcontainer-skeleton.json.template, identique pour tous les
+# clients) : les valeurs (réseau scopé projet, chemin du projet, volumes
+# scopés projet) ne peuvent pas être codées en dur, elles dépendent de
+# PROJECT_ROOT/PROJECT_NAME ; le nom affiché, les extensions/réglages VS
+# Code et le message d'installation viennent de l'adaptateur (lib.sh :
+# DEVCONTAINER_DISPLAY_NAME, DEVCONTAINER_EXTENSIONS,
+# DEVCONTAINER_SETTINGS_JSON, PKG_INSTALL_HINT).
+render_devcontainer() {
+    local template="$REPO_ROOT/scripts/devcontainer-skeleton.json.template"
+    local out="$CLIENT_ROOT/.devcontainer/devcontainer.json"
+    [ -f "$template" ] || return 0
+    # Le dossier .devcontainer/ ne contient plus de fichier suivi par git
+    # (le template est désormais partagé, pas per-client) : le créer au
+    # besoin plutôt que de dépendre de son existence préalable.
+    mkdir -p "$(dirname "$out")"
+    # PROJECT_ROOT est un chemin hôte arbitraire (pas sanitizé comme
+    # NETWORK_NAME/PKG_VOLUME) : échappé via _sed_escape_replacement pour
+    # éviter qu'un "&" ou un "|" dans le chemin ne corrompe silencieusement
+    # le fichier généré ou ne fasse échouer ce sed.
+    # __ALL_MOUNTS__ : contenu de mounts[], voir devcontainer_mounts_json()
+    # ci-dessus.
     # __WORKSPACE_SECURITY_ARGS__ : contrat d'isolation (userns, cap-drop,
     # tmpfs, read-only, security-opt) rendu en JSON depuis
     # WORKSPACE_SECURITY_ARGS (scripts/common.sh), identique aux flags que
@@ -94,18 +156,20 @@ render_devcontainer() {
     # __PROXY_URL__ : même valeur que start_workspace() (proxy_url(),
     # scripts/common.sh), pour que GATEWAY_ADDR_MODE=static soit aussi
     # respecté côté VS Code, pas seulement côté CLI.
-    # __CLIENT_NAME__ : CLIENT_NAME (posé par l'adaptateur, lib.sh) plutôt
-    # qu'une valeur codée en dur dans le template.
+    # __CLIENT_NAME__, __DEVCONTAINER_DISPLAY_NAME__, __PKG_INSTALL_HINT__,
+    # __DEVCONTAINER_EXTENSIONS__, __DEVCONTAINER_SETTINGS__ : posés par
+    # l'adaptateur (lib.sh) plutôt que codés en dur dans le squelette.
     sed \
         -e "s|__NETWORK_NAME__|$(_sed_escape_replacement "$NETWORK_NAME")|g" \
         -e "s|__PROJECT_ROOT__|$(_sed_escape_replacement "$PROJECT_ROOT")|g" \
-        -e "s|${PKG_VOLUME_PLACEHOLDER}|$(_sed_escape_replacement "$PKG_VOLUME")|g" \
-        -e "s|__SELF_PROTECT_MOUNT__|$(_sed_escape_replacement "$self_protect_line")|g" \
+        -e "s|__ALL_MOUNTS__|$(_sed_escape_replacement "$(devcontainer_mounts_json)")|g" \
         -e "s|__WORKSPACE_SECURITY_ARGS__|$(_sed_escape_replacement "$(workspace_security_args_json)")|g" \
-        -e "s|__CACHE_VOLUME__|$(_sed_escape_replacement "$CACHE_VOLUME")|g" \
         -e "s|__PROXY_URL__|$(_sed_escape_replacement "$(proxy_url)")|g" \
         -e "s|__CLIENT_NAME__|$(_sed_escape_replacement "$CLIENT_NAME")|g" \
-        ${extra_volume_sed_args[@]+"${extra_volume_sed_args[@]}"} \
+        -e "s|__DEVCONTAINER_DISPLAY_NAME__|$(_sed_escape_replacement "$DEVCONTAINER_DISPLAY_NAME")|g" \
+        -e "s|__PKG_INSTALL_HINT__|$(_sed_escape_replacement "$PKG_INSTALL_HINT")|g" \
+        -e "s|__DEVCONTAINER_EXTENSIONS__|$(_sed_escape_replacement "$(devcontainer_extensions_json)")|g" \
+        -e "s|__DEVCONTAINER_SETTINGS__|$(_sed_escape_replacement "$DEVCONTAINER_SETTINGS_JSON")|g" \
         "$template" > "$out"
 }
 
@@ -205,9 +269,9 @@ start_workspace() {
     local extra_volume_args=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
 
     # WORKSPACE_SECURITY_ARGS (scripts/common.sh) : même contrat d'isolation
-    # que .devcontainer/devcontainer.json.template (runArgs), généré depuis
-    # cette même valeur par render_devcontainer() — voir le commentaire sur
-    # WORKSPACE_SECURITY_ARGS pour le détail de chaque flag.
+    # que devcontainer.json (runArgs), généré depuis cette même valeur par
+    # render_devcontainer() — voir le commentaire sur WORKSPACE_SECURITY_ARGS
+    # pour le détail de chaque flag.
     podman run --rm -it --name "$WORKSPACE_CONTAINER" \
         --user "$(id -u):$(id -g)" \
         "${WORKSPACE_SECURITY_ARGS[@]}" \

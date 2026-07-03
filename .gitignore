@@ -1,9 +1,10 @@
 .env
 clients/*/.env
 
-# Généré par render_devcontainer() (run.sh up) à partir de
-# devcontainer.json.template : dépend de PROJECT_ROOT/PROJECT_NAME, propre
-# à chaque copie de ia-dev-containers, ne doit pas être commité.
+# Généré par render_devcontainer() (run.sh up) à partir du squelette partagé
+# scripts/devcontainer-skeleton.json.template : dépend de
+# PROJECT_ROOT/PROJECT_NAME, propre à chaque copie de ia-dev-containers, ne
+# doit pas être commité.
 clients/*/.devcontainer/devcontainer.json
 
 # CA d'entreprise déposée localement pour un réseau à inspection TLS (voir

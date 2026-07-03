@@ -46,7 +46,7 @@ Mêmes sous-commandes et variables d'environnement que mistral-vibe (`up|shell|t
 
 ### **Avec VS Code**
 
-1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (génère aussi `devcontainer.json` à partir de `devcontainer.json.template` — ne l'éditez pas directement, il est régénéré à chaque `up`).
+1. Lancer `./scripts/run.sh up` **depuis un terminal, avant** d'ouvrir VS Code (génère aussi `devcontainer.json`, à partir du squelette partagé `scripts/devcontainer-skeleton.json.template` + `scripts/lib.sh` — ne l'éditez pas directement, il est régénéré à chaque `up`).
 2. Ouvrir `clients/copilot` dans VS Code, extension **Remote - Containers**, `F1` → *Reopen in Container*.
 
 > ℹ️ `devcontainer.json` n'utilise pas `--secret` (voir [note équivalente côté mistral-vibe](../mistral-vibe/README.md#avec-vs-code)) : créez le `podman secret` au préalable dans un terminal, ou utilisez `.env`.

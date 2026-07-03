@@ -1,18 +1,26 @@
 {
-  // ⚠️ FICHIER GÉNÉRÉ — ne pas éditer directement, éditer
-  // devcontainer.json.template puis relancer `./scripts/run.sh up`
-  // (qui régénère ce fichier via render_devcontainer() dans run.sh).
+  // ⚠️ FICHIER GÉNÉRÉ (clients/<client>/.devcontainer/devcontainer.json) —
+  // ne pas éditer directement. Deux sources séparées, selon ce qui doit
+  // changer :
+  //   - comportement partagé par tous les clients : éditer CE fichier
+  //     (scripts/devcontainer-skeleton.json.template)
+  //   - nom, extensions VS Code, réglages, message d'installation d'UN
+  //     client : éditer clients/<client>/scripts/lib.sh
+  //     (DEVCONTAINER_DISPLAY_NAME, DEVCONTAINER_EXTENSIONS,
+  //     DEVCONTAINER_SETTINGS_JSON, PKG_INSTALL_HINT)
+  // Puis relancer `./scripts/run.sh up`, qui régénère le fichier via
+  // render_devcontainer() (scripts/orchestrator.sh).
   //
   // ⚠️ PRÉREQUIS OBLIGATOIRE : ce devcontainer ne construit/lance que le
   // conteneur "workspace". Le conteneur "gateway" (proxy Squid, filtrage
   // réseau) et le réseau interne dédié à ce projet doivent déjà exister
   // AVANT d'ouvrir ce dossier dans VS Code :
   //
-  //   cd clients/mistral-vibe && ./scripts/run.sh up
+  //   cd clients/__CLIENT_NAME__ && ./scripts/run.sh up
   //
-  // Si le réseau __NETWORK_NAME__ n'existe pas encore, la création du
-  // conteneur échouera (runArgs y fait référence ci-dessous).
-  "name": "Mistral Vibe CLI - Workspace (sandbox à deux conteneurs)",
+  // Si le réseau __NETWORK_NAME__ n'existe pas encore, la création
+  // du conteneur échouera (runArgs y fait référence ci-dessous).
+  "name": "__DEVCONTAINER_DISPLAY_NAME__ - Workspace (sandbox à deux conteneurs)",
   "containerUser": "devuser",
   "remoteUser": "devuser",
 
@@ -30,26 +38,14 @@
   "workspaceMount": "source=__PROJECT_ROOT__,target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
 
-  // Le premier élément de "mounts" ci-dessous remonte ia-dev-containers/ en
-  // lecture seule sur lui-même quand cette copie est déposée à l'intérieur du
-  // projet (voir README, section Architecture) — le CLI IA peut lire sa
-  // propre config sandbox (git status normal) mais jamais l'écrire. Ligne
-  // vide (donc pas de mount ajouté) si la copie a été relocalisée hors du
-  // projet (IA_PROJECT_ROOT), si ia-dev-containers est lui-même le projet
-  // sandboxé, ou si IA_SELF_MOUNT_RW=1. Calculée par render_devcontainer()
-  // dans run.sh, placeholder substitué ci-dessous.
+  // Contenu généré par devcontainer_mounts_json() (scripts/orchestrator.sh)
+  // depuis les mêmes données que start_workspace() (scripts/common.sh) :
+  // auto-protection de ia-dev-containers/, PKG_VOLUME, EXTRA_VOLUMES,
+  // CACHE_VOLUME — une seule source pour "quels volumes sont montés", pas
+  // un JSON dupliqué à la main par client (voir README, section
+  // Architecture, sur la classe de bug que ça évite).
   "mounts": [
-    __SELF_PROTECT_MOUNT__
-    {
-      "source": "__LOCAL_VOLUME__",
-      "target": "/home/devuser/.local",
-      "type": "volume"
-    },
-    {
-      "source": "__CACHE_VOLUME__",
-      "target": "/home/devuser/.cache",
-      "type": "volume"
-    }
+__ALL_MOUNTS__
   ],
 
   "runArgs": [
@@ -76,26 +72,15 @@ __WORKSPACE_SECURITY_ARGS__
 
   "postCreateCommand": "/security-tests.sh || echo '⚠️  Des tests ont échoué - vérifiez que ./scripts/run.sh up a bien été lancé AVANT d'\\''ouvrir ce dossier (le gateway doit déjà tourner).'",
 
-  "postStartCommand": "echo '🎉 Conteneur workspace Mistral Vibe CLI prêt !' && echo '' && echo '   Proxy (via gateway) : http://gateway:3128' && echo '' && echo '   Pour installer Mistral Vibe :' && echo '   $ pip install --user mistral-vibe' && echo '' && echo '   Seuls les remotes git en HTTPS fonctionnent (pas de SSH/port 22).'",
+  "postStartCommand": "echo '🎉 Conteneur workspace __DEVCONTAINER_DISPLAY_NAME__ prêt !' && echo '' && echo '   Proxy (via gateway) : http://gateway:3128' && echo '' && echo '   Pour installer :' && echo '   $ __PKG_INSTALL_HINT__' && echo '' && echo '   Seuls les remotes git en HTTPS fonctionnent (pas de SSH/port 22).'",
 
   "customizations": {
     "vscode": {
       "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "ms-python.black-formatter",
-        "ms-python.isort",
-        "ms-toolsai.jupyter"
+__DEVCONTAINER_EXTENSIONS__
       ],
       "settings": {
-        "python.pythonPath": "/home/devuser/.local/bin/python3",
-        "python.linting.enabled": true,
-        "python.linting.pylintEnabled": true,
-        "python.formatting.provider": "black",
-        "editor.formatOnSave": true,
-        "[python]": {
-          "editor.defaultFormatter": "ms-python.black-formatter"
-        },
+__DEVCONTAINER_SETTINGS__
         "terminal.integrated.defaultProfile.linux": "bash"
       }
     }

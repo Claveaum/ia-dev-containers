@@ -53,18 +53,20 @@ PKG_VOLUME="${CLIENT_NAME}-$(basename "$PKG_VOLUME_TARGET" | sed -e 's/^\.//')-$
 # Volumes optionnels supplémentaires pour l'état persistant d'un CLI (ex.
 # ~/.copilot : session, jeton d'auth, logs) quand il écrit ailleurs que
 # PKG_VOLUME_TARGET — déclarés par l'adaptateur (lib.sh) via EXTRA_VOLUMES,
-# un tableau de "chemin-cible:jeton-devcontainer" (même idiome que SECRETS
-# pour "secret:VARIABLE_ENV"). Vide par défaut (mistral-vibe aujourd'hui,
-# aucun besoin) — un client peut en déclarer autant qu'il lui faut. Le repli
-# `${EXTRA_VOLUMES[@]+...}` gère aussi bien un tableau vide qu'un tableau
-# jamais déclaré par lib.sh (bash 3.2/set -u, même piège que
-# _collect_arg_lines ci-dessous).
+# un tableau de chemins cibles simples (pas de jeton devcontainer à
+# associer : le mount, côté CLI comme côté devcontainer.json, est dérivé
+# depuis cette même valeur — voir extra_volume_mount_args() ci-dessous et
+# devcontainer_mounts_json() dans scripts/orchestrator.sh). Vide par défaut
+# (mistral-vibe aujourd'hui, aucun besoin) — un client peut en déclarer
+# autant qu'il lui faut. Le repli `${EXTRA_VOLUMES[@]+...}` gère aussi bien
+# un tableau vide qu'un tableau jamais déclaré par lib.sh (bash 3.2/set -u,
+# même piège que _collect_arg_lines ci-dessous).
 EXTRA_VOLUMES=(${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"})
 
-# Nom du volume Podman pour une entrée de EXTRA_VOLUMES (chemin cible
-# uniquement, avant le ":"), dérivé comme PKG_VOLUME : CLIENT_NAME + dernier
-# segment du chemin, scopé par projet — un jeton d'auth compromis dans un
-# projet ne doit pas être silencieusement réutilisable depuis un autre.
+# Nom du volume Podman pour une entrée de EXTRA_VOLUMES, dérivé comme
+# PKG_VOLUME : CLIENT_NAME + dernier segment du chemin, scopé par projet —
+# un jeton d'auth compromis dans un projet ne doit pas être silencieusement
+# réutilisable depuis un autre.
 _extra_volume_name() {
     printf '%s-%s-%s' "$CLIENT_NAME" "$(basename "$1" | sed -e 's/^\.//')" "$PROJECT_NAME"
 }
@@ -73,9 +75,8 @@ _extra_volume_name() {
 # (même idiome que self_protect_mount_arg()/secret_args(), consommé via
 # _collect_arg_lines()) — rien du tout si EXTRA_VOLUMES est vide.
 extra_volume_mount_args() {
-    local entry target
-    for entry in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
-        target="${entry%%:*}"
+    local target
+    for target in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
         printf -- '-v\n%s:%s\n' "$(_extra_volume_name "$target")" "$target"
     done
 }
@@ -91,11 +92,11 @@ GATEWAY_HARDENED="${GATEWAY_HARDENED:-0}"
 
 # Contrat d'isolation du conteneur workspace (namespace utilisateur inclus) :
 # appliqué tel quel par start_workspace() (scripts/orchestrator.sh, `podman
-# run`), et rendu en JSON dans .devcontainer/devcontainer.json.template
-# (runArgs) par workspace_security_args_json() ci-dessous, via
-# render_devcontainer() — source unique pour que les deux chemins de
-# lancement (CLI, VS Code) ne puissent pas diverger sur les garanties de
-# sécurité réelles.
+# run`), et rendu en JSON dans devcontainer.json (runArgs) par
+# workspace_security_args_json() (scripts/orchestrator.sh, colocalisée avec
+# son unique appelante render_devcontainer()) — source unique pour que les
+# deux chemins de lancement (CLI, VS Code) ne puissent pas diverger sur les
+# garanties de sécurité réelles.
 # `userns=keep-id` : mappe l'UID/GID de l'hôte dans le conteneur (au lieu de
 # root), pour que les fichiers créés dans /workspace appartiennent au bon
 # utilisateur côté hôte. Correspond à `--user "$(id -u):$(id -g)"`, posé à
@@ -119,17 +120,6 @@ WORKSPACE_SECURITY_ARGS=(
     --tmpfs=/tmp
     --tmpfs=/run
 )
-
-# WORKSPACE_SECURITY_ARGS, un élément JSON par ligne (avec virgule finale :
-# toujours suivi d'au moins "--network=..." dans le template). Passé par
-# render_devcontainer() à _sed_escape_replacement(), qui échappe aussi les
-# retours à la ligne internes à cette valeur multi-lignes.
-workspace_security_args_json() {
-    local arg
-    for arg in "${WORKSPACE_SECURITY_ARGS[@]}"; do
-        printf '    "%s",\n' "$arg"
-    done
-}
 
 proxy_url() {
     if [ "$GATEWAY_ADDR_MODE" = "static" ]; then
@@ -205,27 +195,6 @@ _collect_arg_lines() {
     while IFS= read -r line; do
         COLLECTED_ARG_LINES+=("$line")
     done < <("$emitter")
-}
-
-# Échappe une valeur pour un usage sûr comme texte de remplacement dans
-# `sed 's|X|VALEUR|g'` : `&` (réinsère le texte matché) et `|` (le délimiteur
-# utilisé ici) doivent être échappés, ainsi que `\` lui-même. Sans ça, un
-# PROJECT_ROOT contenant l'un de ces caractères (ex: "AT&T Project", ou un
-# chemin avec un "|" littéral) corromprait silencieusement le fichier généré
-# ou ferait échouer `sed` en pleine commande `run.sh up`. Deuxième passe :
-# échappe aussi les retours à la ligne internes en `\<retour à la ligne>`,
-# seule syntaxe qu'accepte `sed -e "s|X|VALEUR|g"` pour un texte de
-# remplacement multi-lignes (ex. workspace_security_args_json() ci-dessus) —
-# no-op sur une valeur mono-ligne (rien à remplacer). Fait en bash pur
-# (`${var//motif/remplacement}`, bash 3.2-safe) plutôt qu'avec un deuxième
-# `sed` : l'idiome GNU sed `:a;N;$!ba;s/\n/\\\n/g` pour joindre les lignes
-# n'est pas portable sur BSD sed (macOS), qui interprète `:a;N;...` comme une
-# seule étiquette malformée plutôt que trois commandes distinctes.
-_sed_escape_replacement() {
-    local escaped nl
-    escaped="$(printf '%s' "$1" | sed -e 's/[\&|]/\\&/g')"
-    nl=$'\n'
-    printf '%s' "${escaped//$nl/\\$nl}"
 }
 
 # --- Allocation de subnet par (projet, client) ---

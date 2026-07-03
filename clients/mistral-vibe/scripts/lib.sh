@@ -14,11 +14,44 @@ CLIENT_NAME="mistral-vibe"
 # (pas un simple cache). Le nom du volume Podman (PKG_VOLUME) est dérivé de
 # ce chemin par scripts/common.sh — ne pas le déclarer ici.
 PKG_VOLUME_TARGET="/home/devuser/.local"
-# Jeton substitué dans .devcontainer/devcontainer.json.template par
-# render_devcontainer() (scripts/orchestrator.sh).
-PKG_VOLUME_PLACEHOLDER="__LOCAL_VOLUME__"
 # Libellé utilisé dans le message de security-tests-common.sh (section 2).
 PKG_INSTALL_LABEL="pip"
+
+# Nom affiché dans devcontainer.json ("name", et repris dans le message de
+# postStartCommand) — voir scripts/devcontainer-skeleton.json.template,
+# partagé par tous les clients (render_devcontainer() dans
+# scripts/orchestrator.sh).
+DEVCONTAINER_DISPLAY_NAME="Mistral Vibe CLI"
+
+# Extensions VS Code proposées à l'ouverture de ce devcontainer (client
+# customizations.vscode.extensions, rendu en JSON par
+# devcontainer_extensions_json() dans scripts/orchestrator.sh).
+DEVCONTAINER_EXTENSIONS=(
+    "ms-python.python"
+    "ms-python.vscode-pylance"
+    "ms-python.black-formatter"
+    "ms-python.isort"
+    "ms-toolsai.jupyter"
+)
+
+# Réglages VS Code propres à ce client (customizations.vscode.settings),
+# injectés tels quels avant le réglage générique
+# "terminal.integrated.defaultProfile.linux" (déjà dans le squelette partagé
+# — ne pas le redéclarer ici). Chaque ligne doit se terminer par une
+# virgule : toujours suivi d'au moins ce réglage générique.
+DEVCONTAINER_SETTINGS_JSON='        "python.pythonPath": "/home/devuser/.local/bin/python3",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black",
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.black-formatter"
+        },'
+
+# Commande affichée dans le message de bienvenue (postStartCommand) du
+# devcontainer, pour installer le CLI lui-même (jamais fait au build, voir
+# workspace/Dockerfile).
+PKG_INSTALL_HINT="pip install --user mistral-vibe"
 
 # Domaines vérifiés en section 3 de security-tests-common.sh :
 #   TEST_DOMAIN_PRIMARY   doit réussir, sinon échec dur (registre de paquets
