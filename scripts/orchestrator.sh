@@ -33,8 +33,15 @@ need_podman() {
 
 build_images() {
     echo "🔧 Construction des images..."
-    podman image exists "$GATEWAY_BASE_IMAGE"   || podman build -t "$GATEWAY_BASE_IMAGE"   "$REPO_ROOT/gateway-base"
-    podman image exists "$WORKSPACE_BASE_IMAGE" || podman build -t "$WORKSPACE_BASE_IMAGE" "$REPO_ROOT/workspace-base"
+    # Inconditionnel, comme les deux builds client ci-dessous : `podman build`
+    # a déjà son propre cache de layers (no-op rapide si le Dockerfile/contexte
+    # n'a pas changé). Un garde `podman image exists || ...` ici empêcherait
+    # silencieusement toute modification future de *-base/Dockerfile de
+    # jamais prendre effet sur une machine où le tag existe déjà depuis un
+    # build précédent (vécu : un `RUN` ajouté à workspace-base/Dockerfile
+    # restait invisible, l'overlay client échouant ensuite en FROM dessus).
+    podman build -t "$GATEWAY_BASE_IMAGE"   "$REPO_ROOT/gateway-base"
+    podman build -t "$WORKSPACE_BASE_IMAGE" "$REPO_ROOT/workspace-base"
     podman build -t "$GATEWAY_IMAGE"   "$CLIENT_ROOT/gateway"
     # Contexte = racine du dépôt (pas CLIENT_ROOT) pour que le Dockerfile
     # puisse COPY scripts/security-tests-common.sh, partagé entre clients et
