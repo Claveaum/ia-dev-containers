@@ -70,6 +70,29 @@ else
     fail "Impossible d'écrire dans /workspace !"
 fi
 
+# Auto-protection de ia-dev-containers/ (voir README, section Architecture) :
+# absent si la copie a été relocalisée hors du projet (IA_PROJECT_ROOT), si
+# ia-dev-containers est lui-même le projet sandboxé, ou si IA_SELF_MOUNT_RW=1
+# — dans ces cas, rien à vérifier ici, ce n'est pas un échec.
+sc_test_file="/workspace/ia-dev-containers/.ia-write-test.$$"
+if [ ! -d "/workspace/ia-dev-containers" ]; then
+    warn "/workspace/ia-dev-containers absent (relocalisé, dogfooding, ou IA_SELF_MOUNT_RW=1) — auto-protection non applicable"
+elif [ -e "$sc_test_file" ]; then
+    warn "$sc_test_file existe déjà, test d'auto-protection ignoré (collision improbable)"
+else
+    if cat "/workspace/ia-dev-containers/README.md" > /dev/null 2>&1; then
+        pass "ia-dev-containers/ reste lisible depuis le workspace"
+    else
+        fail "ia-dev-containers/ n'est plus lisible depuis le workspace !"
+    fi
+    if touch "$sc_test_file" 2>/dev/null; then
+        fail "ia-dev-containers/ est accessible en écriture depuis le workspace ! (auto-protection cassée)"
+        rm -f "$sc_test_file"
+    else
+        pass "ia-dev-containers/ est protégé en écriture depuis le workspace"
+    fi
+fi
+
 if touch "/home/${USER:-devuser}/.npm-global/test-security" 2>/dev/null; then
     pass "~/.npm-global est accessible en écriture (pour npm install -g)"
     rm -f "/home/${USER:-devuser}/.npm-global/test-security"

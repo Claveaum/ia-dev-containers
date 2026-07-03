@@ -26,6 +26,10 @@ set -euo pipefail
 #                           parent de cette copie de ia-dev-containers)
 #   IA_PROJECT_NAME         force le nom utilisé pour scoper les ressources
 #                           Podman (par défaut : nom du dossier PROJECT_ROOT)
+#   IA_SELF_MOUNT_RW=1      désactive l'auto-protection en lecture seule de
+#                           ia-dev-containers/ dans /workspace (voir README,
+#                           section Architecture) — le CLI IA peut alors
+#                           modifier sa propre config sandbox depuis l'intérieur
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,10 +65,20 @@ render_devcontainer() {
     # NETWORK_NAME/LOCAL_VOLUME) : échappé via _sed_escape_replacement
     # (scripts/common.sh) pour éviter qu'un "&" ou un "|" dans le chemin ne
     # corrompe silencieusement le fichier généré ou ne fasse échouer ce sed.
+    # __SELF_PROTECT_MOUNT__ : entrée de mounts[] qui protège ia-dev-containers/
+    # en lecture seule (voir scripts/common.sh: self_protect_mount_arg()), ou
+    # chaîne vide si non applicable (relocalisé hors du projet, dogfooding, ou
+    # IA_SELF_MOUNT_RW=1) — la ligne du template disparaît alors simplement.
+    local self_protect_relpath self_protect_line=""
+    self_protect_relpath="$(_self_protect_relpath)"
+    if [ -n "$self_protect_relpath" ]; then
+        self_protect_line="\"source=${REPO_ROOT},target=/workspace/${self_protect_relpath},type=bind,readonly\","
+    fi
     sed \
         -e "s|__NETWORK_NAME__|$(_sed_escape_replacement "$NETWORK_NAME")|g" \
         -e "s|__PROJECT_ROOT__|$(_sed_escape_replacement "$PROJECT_ROOT")|g" \
         -e "s|__LOCAL_VOLUME__|$(_sed_escape_replacement "$LOCAL_VOLUME")|g" \
+        -e "s|__SELF_PROTECT_MOUNT__|$(_sed_escape_replacement "$self_protect_line")|g" \
         "$template" > "$out"
 }
 
@@ -156,6 +170,14 @@ start_workspace() {
         secret_args_list+=("$line")
     done < <(secret_args)
 
+    # Auto-protection : remonte ia-dev-containers/ en lecture seule sur
+    # lui-même dans /workspace (voir scripts/common.sh: self_protect_mount_arg())
+    # — vide si non applicable (relocalisé, dogfooding, IA_SELF_MOUNT_RW=1).
+    local self_mount_args=()
+    while IFS= read -r line; do
+        self_mount_args+=("$line")
+    done < <(self_protect_mount_arg)
+
     # --security-opt=label=disable : /workspace est un bind-mount du vrai
     # projet hôte (PROJECT_ROOT), pas un volume Podman. Sous SELinux
     # (Fedora/RHEL), un bind-mount d'un chemin arbitraire est refusé sans
@@ -173,6 +195,7 @@ start_workspace() {
         --read-only --tmpfs=/tmp --tmpfs=/run \
         --network="$NETWORK_NAME" \
         -v "${PROJECT_ROOT}:/workspace" \
+        ${self_mount_args[@]+"${self_mount_args[@]}"} \
         -v "${LOCAL_VOLUME}:/home/devuser/.local" \
         -v "${CACHE_VOLUME}:/home/devuser/.cache" \
         -e HTTP_PROXY="$proxy" -e HTTPS_PROXY="$proxy" \
@@ -232,6 +255,7 @@ case "$cmd" in
         echo "Projet détecté : $PROJECT_ROOT"
         echo "Nom sandbox     : $PROJECT_NAME"
         echo "Réseau          : $NETWORK_NAME"
+        echo "Auto-protection : $(self_protect_status)"
         if podman network exists "$NETWORK_NAME"; then
             echo "  subnet (existant) : $(podman network inspect "$NETWORK_NAME" --format '{{(index .Subnets 0).Subnet}}')"
         else

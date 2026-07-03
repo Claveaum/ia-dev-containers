@@ -30,7 +30,16 @@
   "workspaceMount": "source=__PROJECT_ROOT__,target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
 
+  // Le premier élément de "mounts" ci-dessous remonte ia-dev-containers/ en
+  // lecture seule sur lui-même quand cette copie est déposée à l'intérieur du
+  // projet (voir README, section Architecture) — le CLI IA peut lire sa
+  // propre config sandbox (git status normal) mais jamais l'écrire. Ligne
+  // vide (donc pas de mount ajouté) si la copie a été relocalisée hors du
+  // projet (IA_PROJECT_ROOT), si ia-dev-containers est lui-même le projet
+  // sandboxé, ou si IA_SELF_MOUNT_RW=1. Calculée par render_devcontainer()
+  // dans run.sh, placeholder substitué ci-dessous.
   "mounts": [
+    __SELF_PROTECT_MOUNT__
     {
       "source": "__LOCAL_VOLUME__",
       "target": "/home/devuser/.local",
