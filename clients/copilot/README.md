@@ -107,7 +107,7 @@ Pour ajouter un domaine : éditer `gateway/config/allowed-urls.txt`, puis `./scr
 ./scripts/run.sh test
 ```
 
-En plus des vérifications communes (non-root, sudo bloqué, lecture seule, Node/npm disponibles), ce test vérifie spécifiquement que `api.githubcopilot.com` passe par l'allowlist — un test discriminant pour le matching de sous-domaine Squid (`.githubcopilot.com` avec point de tête matche les sous-domaines, une entrée sans point ne matcherait que l'hôte exact).
+En plus des vérifications communes (non-root, sudo bloqué, lecture seule, `ia-dev-containers/` lisible mais protégé en écriture — auto-protection, voir le [tableau mistral-vibe](../mistral-vibe/README.md#-mesures-de-sécurité), Node/npm disponibles), ce test vérifie spécifiquement que `api.githubcopilot.com` passe par l'allowlist — un test discriminant pour le matching de sous-domaine Squid (`.githubcopilot.com` avec point de tête matche les sous-domaines, une entrée sans point ne matcherait que l'hôte exact).
 
 ```bash
 # Nom de conteneur scopé par projet : copilot-<projet>-gateway (voir `run.sh doctor`)
@@ -120,8 +120,8 @@ podman exec $(podman ps --filter name=copilot- --filter name=-gateway --format '
 
 Voir la [FAQ mistral-vibe](../mistral-vibe/README.md#-faq) (identique : pourquoi deux conteneurs, pourquoi Podman, comment tester le proxy manuellement, dépannage des conteneurs).
 
-**Pourquoi Alpine 3.21 pour le workspace alors que mistral-vibe utilise 3.20 via la même image `workspace-base` ?**
-`workspace-base` a été mis à jour vers 3.21 pour les deux clients (Node.js ≥ 22 n'existe pas sur 3.20). `gateway-base` reste en 3.20 : aucune dépendance Node côté gateway, pas de raison de faire bouger un composant déjà audité (Squid/nftables/abandon de privilèges).
+**Pourquoi `workspace-base` est en Alpine 3.21 alors que `gateway-base` est resté en 3.20 ?**
+`workspace-base` a été mis à jour vers 3.21 pour les deux clients (Node.js ≥ 22, requis par Copilot CLI, n'existe pas sur 3.20 ; mistral-vibe en bénéficie aussi sans régression). `gateway-base` reste en 3.20 : aucune dépendance Node côté gateway, pas de raison de faire bouger un composant déjà audité (Squid/nftables/abandon de privilèges).
 
 ---
 

@@ -113,6 +113,8 @@ chmod 600 .env
 | Abandon définitif des privilèges | `gateway` (`GATEWAY_HARDENED=1`) | `su-exec nobody` après chargement des règles réseau, capacités effectives = 0 |
 | Lecture seule | les deux conteneurs | `--read-only` + tmpfs |
 | `pip install --user` sans sudo | `workspace` | |
+| Auto-protection | `ia-dev-containers/` remonté en lecture seule sur lui-même dans `/workspace` (par défaut) | `run.sh doctor` pour le statut, `run.sh test` pour la vérification — voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) |
+| Cohérence CLI / VS Code | Contrat d'isolation, proxy et `IA_CLIENT` générés depuis une source unique — `run.sh shell`/`test` et le devcontainer VS Code ne peuvent pas diverger | `scripts/common.sh`, voir le [README racine](../../README.md#-mesures-de-sécurité-implémentées) |
 | Isolation entre projets | réseau, conteneurs, images overlay, `~/.local` | scopés par projet, voir [README racine](../../README.md#-isolation-entre-projets) |
 | ⚠️ **Non couvert** | `/workspace` | bind-mount du projet réel, pas un volume vide — voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) |
 
@@ -143,7 +145,7 @@ Ce que le script vérifie réellement (exécuté depuis le workspace, contre le 
 2. Le workspace **peut** atteindre un domaine autorisé via le gateway (`curl -x http://gateway:3128 https://pypi.org` → 200).
 3. Le workspace **ne peut pas** atteindre un domaine non autorisé via le gateway (`curl -x http://gateway:3128 https://facebook.com` → 403).
 
-Plus les vérifications habituelles : non-root, sudo bloqué, filesystem en lecture seule, `~/.local` inscriptible, Python/pip disponibles.
+Plus les vérifications habituelles : non-root, sudo bloqué, filesystem en lecture seule, `ia-dev-containers/` lisible mais protégé en écriture (auto-protection, voir le tableau ci-dessus), `~/.local` inscriptible, Python/pip disponibles.
 
 Vérifications côté gateway (utilisateur effectif de Squid, `ip_forward`, capacités) :
 ```bash

@@ -180,7 +180,7 @@ Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME
 
 `./scripts/run.sh doctor` affiche le nom de projet détecté et le réseau qui lui correspond. Deux projets qui portent le même nom de dossier entreraient en collision de noms de ressources ; forcez un nom explicite avec `IA_PROJECT_NAME=mon-projet-2 ./scripts/run.sh up` dans ce cas.
 
-**Vérifié dans ce sandbox** : deux projets factices, chacun avec sa propre copie de `ia-dev-containers`, lancés simultanément (`run.sh up` sur les deux) — réseaux et subnets distincts confirmés (`podman network inspect`), gateways des deux projets actifs en parallèle, workspace de chacun ne voyant que ses propres fichiers, suite de sécurité complète (12/12) rejouée avec succès dans ce contexte multi-projets.
+**Vérifié dans ce sandbox** : deux projets factices, chacun avec sa propre copie de `ia-dev-containers`, lancés simultanément (`run.sh up` sur les deux) — réseaux et subnets distincts confirmés (`podman network inspect`), gateways des deux projets actifs en parallèle, workspace de chacun ne voyant que ses propres fichiers, suite de sécurité complète (14/14) rejouée avec succès dans ce contexte multi-projets.
 
 ---
 
@@ -197,7 +197,7 @@ Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME
 | **Isolation utilisateur** | Abandon définitif des privilèges | `gateway` : `su-exec nobody` après chargement des règles réseau |
 | **Isolation filesystem** | Lecture seule | `--read-only` + tmpfs sur les deux conteneurs |
 | **Capacités** | `--cap-drop=ALL` sur les deux conteneurs | capacités ajoutées seulement temporairement sur le gateway durci |
-| **Cohérence CLI / VS Code** | Le contrat d'isolation du workspace (`--cap-drop`, `--read-only`, `--tmpfs`, `--security-opt`) est généré depuis une source unique (`WORKSPACE_SECURITY_ARGS`, `scripts/common.sh`) — les deux chemins de lancement ne peuvent pas diverger | `run.sh shell`/`test` (`podman run` direct) et `.devcontainer/devcontainer.json` (VS Code), rendu par `render_devcontainer()` |
+| **Cohérence CLI / VS Code** | Le contrat d'isolation du workspace (`--userns`, `--cap-drop`, `--read-only`, `--tmpfs`, `--security-opt`), l'URL du proxy et `IA_CLIENT` sont générés depuis une source unique (`WORKSPACE_SECURITY_ARGS`/`proxy_url()`/`CLIENT_NAME`, `scripts/common.sh`) — les deux chemins de lancement ne peuvent pas diverger | `run.sh shell`/`test` (`podman run` direct) et `.devcontainer/devcontainer.json` (VS Code), rendu par `render_devcontainer()` |
 | **Installation de dépendances** | `pip install --user` sans sudo | `workspace` |
 | **Secrets** | `podman secret` (type=env), repli `--env-file .env` | `run.sh secrets` pour le statut ; jamais `-e CLE=valeur` |
 | **Audit** | Tests automatiques exécutés contre le vrai gateway | `run.sh test` / `security-tests.sh` |

@@ -43,7 +43,7 @@ Ce projet copie `ia-dev-containers` à la racine du projet à sandboxer et monte
 
 ## Compatibilité bash des scripts `run.sh`
 
-macOS fournit bash 3.2 en `/bin/bash` par défaut (pas de `mapfile`, et — piège plus subtil — sous `set -u`, l'expansion d'un tableau vide `"${arr[@]}"` lève `unbound variable`, contrairement à bash ≥4.4). Les deux `run.sh` en dépendaient (secrets absents, `.env` absent, gateway durci) et auraient planté au tout premier lancement sur macOS. **Vérifié dans ce sandbox** (pas seulement lu dans le code) via `podman run --rm -i docker.io/library/bash:3.2 bash -s < script.sh` reproduisant le chemin vide puis confirmant le correctif (`${arr[@]+"${arr[@]}"}`) ; suite de sécurité complète (12/12, deux phases, deux clients) rejouée sur Linux ensuite sans régression. Ceci ne remplace pas un test sur bash 3.2 réel macOS, mais couvre la même version exacte de l'interpréteur.
+macOS fournit bash 3.2 en `/bin/bash` par défaut (pas de `mapfile`, et — piège plus subtil — sous `set -u`, l'expansion d'un tableau vide `"${arr[@]}"` lève `unbound variable`, contrairement à bash ≥4.4). Les deux `run.sh` en dépendaient (secrets absents, `.env` absent, gateway durci) et auraient planté au tout premier lancement sur macOS. **Vérifié dans ce sandbox** (pas seulement lu dans le code) via `podman run --rm -i docker.io/library/bash:3.2 bash -s < script.sh` reproduisant le chemin vide puis confirmant le correctif (`${arr[@]+"${arr[@]}"}`) ; suite de sécurité complète (14/14, deux phases, deux clients) rejouée sur Linux ensuite sans régression. Ceci ne remplace pas un test sur bash 3.2 réel macOS, mais couvre la même version exacte de l'interpréteur.
 
 ## Check-list de validation à faire sur matériel réel (non exécutée dans cette session)
 
