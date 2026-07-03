@@ -63,10 +63,14 @@ RUN echo "${USERNAME} ALL=(ALL) PASSWD: ALL" > /etc/sudoers.d/${USERNAME} && \
     chmod 0440 /etc/sudoers.d/${USERNAME} && \
     chmod 555 /usr/bin/sudo
 
-RUN mkdir -p /home/${USERNAME}/.local \
-    /home/${USERNAME}/.cache \
-    /home/${USERNAME}/.npm-global \
-    && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.local \
+COPY scripts/prepare-state-dir.sh /prepare-state-dir.sh
+RUN chmod +x /prepare-state-dir.sh
+
+# Voir prepare-state-dir.sh pour le détail (chmod 2775, pas un simple chown) :
+# nécessaire pour qu'un host dont l'UID diffère de ${USER_UID} (macOS) puisse
+# quand même écrire dans ces volumes via --userns=keep-id.
+RUN PREPARE_STATE_DIR_USER=${USERNAME} /prepare-state-dir.sh \
+    /home/${USERNAME}/.local \
     /home/${USERNAME}/.cache \
     /home/${USERNAME}/.npm-global
 

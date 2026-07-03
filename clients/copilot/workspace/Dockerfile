@@ -35,14 +35,21 @@ COPY clients/copilot/scripts/lib.sh /lib.sh
 # d'install (repéré via un volume scopé par projet réellement vide, jamais
 # vu avant car le volume partagé de dev avait déjà ces dossiers depuis un
 # ancien `npm install -g` réel).
-RUN mkdir -p /home/devuser/.npm-global/lib /home/devuser/.npm-global/bin \
-    && chown -R devuser:devuser /home/devuser/.npm-global
-
+#
 # ~/.copilot (session, jeton d'auth après /login, logs de @github/copilot) :
-# même piège de volume nommé root:root que ci-dessus si ce répertoire
-# n'existe pas déjà, chowné, dans l'image avant le premier mount.
-RUN mkdir -p /home/devuser/.copilot \
-    && chown -R devuser:devuser /home/devuser/.copilot
+# même piège de volume nommé root:root si ce répertoire n'existe pas déjà,
+# chowné, dans l'image avant le premier mount.
+#
+# prepare-state-dir.sh (workspace-base) pose aussi le bit setgid + écriture
+# groupe (2775, pas un simple chown) : sans lui, un host dont l'UID diffère
+# de celui de devuser (macOS) ne peut pas écrire dans ces répertoires malgré
+# son appartenance de groupe via --userns=keep-id (voir ce script pour le
+# détail — vécu en prod avec `npm install -g @github/copilot` EACCES sur
+# ~/.cache/npm).
+RUN /prepare-state-dir.sh \
+    /home/devuser/.npm-global/lib \
+    /home/devuser/.npm-global/bin \
+    /home/devuser/.copilot
 
 VOLUME /home/devuser/.npm-global
 VOLUME /home/devuser/.cache
