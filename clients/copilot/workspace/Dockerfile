@@ -1,12 +1,22 @@
+# Runtime Node.js officiel (glibc), copié plus bas plutôt qu'installé via le
+# gestionnaire de paquets de workspace-base (Debian) : voir le commentaire
+# juste en dessous pour le pourquoi (segfault musl/arm64), et l'en-tête de
+# workspace-base/Dockerfile pour le contexte complet.
+FROM node:22-bookworm-slim AS node-src
+
 FROM ia-dev-containers-workspace-base:latest
 
 # ---- Node.js 22+ (exigence de @github/copilot) + npm ----
-# @github/copilot n'a qu'une dépendance pure JS (detect-libc) : pas besoin
-# de build-base/toolchain de compilation native ici.
-RUN apk add --no-cache \
-    nodejs \
-    npm \
-    && rm -rf /var/cache/apk/*
+# Copié depuis l'image officielle node:22-bookworm-slim (glibc) plutôt
+# qu'installé via `apt-get install nodejs` : Debian ne package pas Node >= 22
+# dans ses dépôts stables, et surtout, `@github/copilot` segfault de façon
+# reproductible sur un binaire natif lié à musl (Alpine, voir l'historique de
+# ce Dockerfile) - le lier à glibc (confirmé sur matériel réel, macOS Apple
+# Silicon, avant cette bascule) est la raison même du passage de
+# workspace-base sur Debian. `/usr/local` regroupe le binaire node et npm/npx
+# (symlinks relatifs vers lib/node_modules/npm/bin/) : copier le dossier
+# entier préserve ces liens, plutôt que de cibler chaque fichier un par un.
+COPY --from=node-src /usr/local/ /usr/local/
 
 # Installation globale sans root : préfixe pointé vers un répertoire déjà
 # créé/chown par workspace-base. Le paquet @github/copilot lui-même N'EST

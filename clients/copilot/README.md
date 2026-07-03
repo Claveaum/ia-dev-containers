@@ -18,6 +18,8 @@ Réseau interne dédié, scopé par (client, projet) — distinct de celui de mi
 
 Ce client a été validé pour les mêmes propriétés mécaniques que mistral-vibe : isolation réseau (aucune route directe), allowlist de domaines fonctionnelle (y compris le matching de sous-domaines `*.githubcopilot.com`), non-root, filesystem en lecture seule, `npm install -g` fonctionnel dans `~/.npm-global`. Le CLI `copilot` a aussi été vérifié capable de démarrer et d'initialiser son état (`~/.copilot`, volume dédié — voir plus bas) sans authentification réelle : sans ce volume, il quittait silencieusement (aucune sortie, code 1) dès le premier lancement, faute de pouvoir écrire sous `$HOME` en lecture seule.
 
+**Vérifié sur matériel réel (macOS Apple Silicon)** : le binaire natif de `@github/copilot` (`@github/copilot-linuxmusl-arm64`) segfaute de façon reproductible sur Alpine (musl), y compris hors de tout durcissement du sandbox (cap-drop, read-only, userns retirés — même résultat) — bug upstream connu, non résolu ([github/copilot-cli#107](https://github.com/github/copilot-cli/issues/107)). `workspace-base` est passé sur Debian bookworm-slim (glibc) pour cette raison ; `copilot --version` a été confirmé fonctionnel après cette bascule.
+
 **Non testé ici** : une session Copilot CLI authentifiée de bout en bout (nécessite un abonnement GitHub Copilot actif et des identifiants réels, indisponibles dans cet environnement de développement). Si un domaine nécessaire à l'authentification ou à l'usage réel manque à l'allowlist, ajoutez-le à `gateway/config/allowed-urls.txt` (voir la section Dépannage).
 
 ---
@@ -59,7 +61,7 @@ npm install -g @github/copilot
 copilot --version
 ```
 
-> Node.js ≥ 22 est requis par `@github/copilot` — c'est pour ça que `workspace-base` (partagé avec mistral-vibe) doit rester sur Alpine ≥ 3.21, la première version à fournir `nodejs` 22 nativement (actuellement 3.24, `nodejs` 24).
+> Node.js ≥ 22 est requis par `@github/copilot`. Ce Dockerfile copie le runtime Node officiel (`node:22-bookworm-slim`, glibc) plutôt que d'installer le paquet `nodejs` de Debian (absent/trop ancien dans les dépôts stables) — voir `clients/copilot/workspace/Dockerfile`. `workspace-base` (partagé avec mistral-vibe) est lui-même sur Debian bookworm-slim (glibc), pas Alpine : le binaire natif de `@github/copilot` segfaute de façon reproductible sur musl, indépendamment de tout durcissement du sandbox (bug upstream connu).
 
 ### **Authentification**
 

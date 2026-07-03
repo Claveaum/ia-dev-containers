@@ -5,34 +5,41 @@
 # uniquement au réseau interne dédié au projet (scopé par client+projet, voir
 # clients/*/scripts/lib.sh), ne peut joindre que le gateway.
 # Pas de squid/iptables ici : le filtrage réseau vit entièrement dans le
-# conteneur gateway (voir gateway-base/).
+# conteneur gateway (voir gateway-base/, resté sur Alpine - aucune dépendance
+# Node ni raison de bouger un composant audité).
 #
-# Doit rester >= 3.21 : c'est la première version à fournir Node.js >= 22
-# nativement, requis par le client Copilot (mistral-vibe en bénéficie aussi
-# sans régression). Bump délibéré 3.21 -> 3.24 (nodejs 22.23.0 -> 24.17.0,
-# python3 3.12 -> 3.14) : revalidé en entier après ce bump (les deux
-# clients, voir README, section Sécurité).
+# glibc (Debian), pas Alpine (musl) : `@github/copilot` (client Copilot)
+# segfault de façon reproductible sur musl/arm64 (constaté sur matériel réel,
+# macOS Apple Silicon) - bug upstream connu, non résolu, indépendant de tout
+# durcissement de ce sandbox (reproduit y compris hors sandbox, cap-drop=ALL/
+# --read-only/--userns=keep-id retirés). Confirmé résolu par un binaire lié à
+# glibc avant de migrer ce Dockerfile (voir github/copilot-cli#107). mistral-
+# vibe (Python/pip) n'a aucune dépendance à musl - bascule sans régression.
+# Pin délibéré sur bookworm-slim (pas `latest`) : reproductibilité des builds,
+# et version alignée avec les images node:22-bookworm-slim dont le client
+# Copilot copie le runtime Node (voir clients/copilot/workspace/Dockerfile).
 # =============================================================================
-FROM alpine:3.24
-
-# --- Confiance CA d'entreprise (optionnelle), partie 1/2 ---
-# Ajout "à la main" AVANT tout apk : sur un réseau qui intercepte le TLS
-# (proxy corporate), apk lui-même (dépôts https://dl-cdn.alpinelinux.org)
-# doit déjà faire confiance à la CA d'entreprise pour son propre
-# `apk update`. ca-certificates-bundle est déjà présent dans l'image de
-# base (vérifié), donc `cat` (busybox) suffit ici, pas besoin d'apk avant
-# ce point. certs/ est vide par défaut (.gitkeep) -> `find` ne matche rien
-# -> no-op strict pour qui n'a pas de CA d'entreprise à ajouter.
-COPY certs/ /usr/local/share/ca-certificates/
-RUN find /usr/local/share/ca-certificates -maxdepth 1 -name '*.crt' -exec cat {} + \
-        >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+FROM debian:bookworm-slim
 
 ARG USERNAME=devuser
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-RUN apk update && apk upgrade && \
-    apk add --no-cache \
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- Confiance CA d'entreprise (optionnelle) ---
+# Contrairement à Alpine (apk, dépôts https://dl-cdn.alpinelinux.org), aucun
+# bootstrap de confiance n'est nécessaire ici avant le premier apt-get : les
+# dépôts par défaut de l'image `slim` (vérifié : /etc/apt/sources.list.d/) sont
+# en `http://deb.debian.org`, l'intégrité des paquets étant garantie par la
+# signature GPG du Release (debian-archive-keyring), pas par TLS - une
+# interception TLS du réseau d'entreprise n'affecte donc pas apt lui-même.
+# certs/ est vide par défaut (.gitkeep) -> simple dépôt ici, repris par
+# update-ca-certificates une fois le paquet ca-certificates installé
+# ci-dessous -> no-op strict pour qui n'a pas de CA d'entreprise à ajouter.
+COPY certs/ /usr/local/share/ca-certificates/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         bash \
         coreutils \
@@ -41,18 +48,17 @@ RUN apk update && apk upgrade && \
         curl \
         openssh-client \
         sudo \
-        && rm -rf /var/cache/apk/*
+    && rm -rf /var/lib/apt/lists/*
 
 # --- Confiance CA d'entreprise, partie 2/2 ---
-# apk upgrade peut avoir régénéré /etc/ssl/certs/ca-certificates.crt depuis
-# le seul contenu du paquet ca-certificates-bundle, effaçant l'ajout
-# ci-dessus. update-ca-certificates relit /usr/local/share/ca-certificates/
-# (déjà rempli par le COPY) et régénère le bundle proprement -> idempotent,
-# no-op strict si certs/ est vide.
+# update-ca-certificates (fourni par le paquet ca-certificates installé
+# ci-dessus) relit /usr/local/share/ca-certificates/ (déjà rempli par le
+# COPY) et régénère /etc/ssl/certs/ca-certificates.crt -> idempotent, no-op
+# strict si certs/ est vide.
 RUN update-ca-certificates
 
-RUN addgroup -g ${USER_GID} ${USERNAME} && \
-    adduser -D -u ${USER_UID} -G ${USERNAME} -s /bin/bash ${USERNAME} && \
+RUN groupadd -g ${USER_GID} ${USERNAME} && \
+    useradd -m -u ${USER_UID} -g ${USERNAME} -s /bin/bash ${USERNAME} && \
     mkdir -p /home/${USERNAME}/.ssh && \
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 
@@ -84,10 +90,11 @@ ENV IA_CLIENT=unknown
 # HTTP_PROXY/HTTPS_PROXY ne sont PAS fixées ici (ni dans les overlays clients).
 # "gateway" ne résout et n'est joignable qu'au runtime, une fois le conteneur
 # attaché au réseau interne partagé avec le gateway - pas au moment du build.
-# Une ENV figée ici casserait tout `apk add`/`pip install` ultérieur au build
-# (apk respecte HTTP_PROXY et tenterait de résoudre un hôte "gateway" qui
-# n'existe pas encore). Le proxy est injecté uniquement au runtime par
-# scripts/orchestrator.sh: start_workspace() (proxy_url() dans scripts/common.sh).
+# Une ENV figée ici casserait tout `apt-get install`/`pip install` ultérieur
+# au build (apt respecte HTTP_PROXY et tenterait de résoudre un hôte
+# "gateway" qui n'existe pas encore). Le proxy est injecté uniquement au
+# runtime par scripts/orchestrator.sh: start_workspace() (proxy_url() dans
+# scripts/common.sh).
 ENV NO_PROXY=localhost,127.0.0.1
 
 # Certains outils ignorent le magasin système par défaut (CA vendorisée) :
@@ -114,8 +121,8 @@ RUN chown ${USERNAME}:${USERNAME} /workspace
 VOLUME /workspace
 
 # Pas de USER ici volontairement : les overlays clients (ex: clients/*/workspace/
-# Dockerfile) ont souvent besoin d'installer des paquets via `apk add` après ce
-# FROM, ce qui exige root. Chaque overlay client doit terminer par
+# Dockerfile) ont souvent besoin d'installer des paquets via `apt-get install`
+# après ce FROM, ce qui exige root. Chaque overlay client doit terminer par
 # `USER ${USERNAME}` une fois ses propres RUN d'installation terminés.
 
 ENTRYPOINT ["/entrypoint.sh"]

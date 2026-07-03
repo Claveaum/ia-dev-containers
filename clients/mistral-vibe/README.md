@@ -158,8 +158,8 @@ podman exec $(podman ps --filter name=mistral-vibe- --filter name=-gateway --for
 ## 🔄 **Mise à jour**
 
 ```bash
-podman pull docker.io/library/alpine:3.24   # gateway-base
-podman pull docker.io/library/alpine:3.24   # workspace-base (partagé avec le client Copilot)
+podman pull docker.io/library/alpine:3.24            # gateway-base
+podman pull docker.io/library/debian:bookworm-slim   # workspace-base (partagé avec le client Copilot)
 ./scripts/run.sh down --purge-network
 podman build --no-cache -t ia-dev-containers-gateway-base:latest ../../gateway-base
 podman build --no-cache -t ia-dev-containers-workspace-base:latest ../../workspace-base
