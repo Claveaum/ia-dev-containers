@@ -197,6 +197,7 @@ Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME
 | **Isolation utilisateur** | Abandon définitif des privilèges | `gateway` : `su-exec nobody` après chargement des règles réseau |
 | **Isolation filesystem** | Lecture seule | `--read-only` + tmpfs sur les deux conteneurs |
 | **Capacités** | `--cap-drop=ALL` sur les deux conteneurs | capacités ajoutées seulement temporairement sur le gateway durci |
+| **Cohérence CLI / VS Code** | Le contrat d'isolation du workspace (`--cap-drop`, `--read-only`, `--tmpfs`, `--security-opt`) est généré depuis une source unique (`WORKSPACE_SECURITY_ARGS`, `scripts/common.sh`) — les deux chemins de lancement ne peuvent pas diverger | `run.sh shell`/`test` (`podman run` direct) et `.devcontainer/devcontainer.json` (VS Code), rendu par `render_devcontainer()` |
 | **Installation de dépendances** | `pip install --user` sans sudo | `workspace` |
 | **Secrets** | `podman secret` (type=env), repli `--env-file .env` | `run.sh secrets` pour le statut ; jamais `-e CLE=valeur` |
 | **Audit** | Tests automatiques exécutés contre le vrai gateway | `run.sh test` / `security-tests.sh` |

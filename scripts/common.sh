@@ -59,6 +59,41 @@ GATEWAY_ADDR_MODE="${GATEWAY_ADDR_MODE:-dns}"
 # 1 = Phase 2 (gateway root-in-userns -> nftables -> abandon de privilèges)
 GATEWAY_HARDENED="${GATEWAY_HARDENED:-0}"
 
+# Contrat d'isolation du conteneur workspace : appliqué tel quel par
+# start_workspace() (scripts/orchestrator.sh, `podman run`), et rendu en JSON
+# dans .devcontainer/devcontainer.json.template (runArgs) par
+# workspace_security_args_json() ci-dessous, via render_devcontainer() —
+# source unique pour que les deux chemins de lancement (CLI, VS Code) ne
+# puissent pas diverger sur les garanties de sécurité réelles.
+# `security-opt=label=disable` : /workspace est un bind-mount d'un chemin
+# hôte arbitraire (PROJECT_ROOT), pas un volume Podman. Sous SELinux
+# (Fedora/RHEL), un bind-mount d'un chemin arbitraire est refusé sans
+# relabeling. L'alternative `:Z` sur le mount relabelerait récursivement les
+# fichiers RÉELS du projet sur le disque (effet de bord persistant hors du
+# sandbox) ; label=disable désactive le confinement SELinux pour ce
+# conteneur sans toucher aux labels du projet — vérifié : les deux
+# permettent l'écriture, seul label=disable laisse `ls -Z` sur le projet
+# hôte inchangé. No-op inoffensif sur les hôtes sans SELinux.
+WORKSPACE_SECURITY_ARGS=(
+    --cap-drop=ALL
+    --security-opt=no-new-privileges
+    --security-opt=label=disable
+    --read-only
+    --tmpfs=/tmp
+    --tmpfs=/run
+)
+
+# WORKSPACE_SECURITY_ARGS, un élément JSON par ligne (avec virgule finale :
+# toujours suivi d'au moins "--network=..." dans le template). Passé par
+# render_devcontainer() à _sed_escape_replacement(), qui échappe aussi les
+# retours à la ligne internes à cette valeur multi-lignes.
+workspace_security_args_json() {
+    local arg
+    for arg in "${WORKSPACE_SECURITY_ARGS[@]}"; do
+        printf '    "%s",\n' "$arg"
+    done
+}
+
 proxy_url() {
     if [ "$GATEWAY_ADDR_MODE" = "static" ]; then
         echo "http://${GATEWAY_IP}:3128"
@@ -140,9 +175,20 @@ _collect_arg_lines() {
 # utilisé ici) doivent être échappés, ainsi que `\` lui-même. Sans ça, un
 # PROJECT_ROOT contenant l'un de ces caractères (ex: "AT&T Project", ou un
 # chemin avec un "|" littéral) corromprait silencieusement le fichier généré
-# ou ferait échouer `sed` en pleine commande `run.sh up`.
+# ou ferait échouer `sed` en pleine commande `run.sh up`. Deuxième passe :
+# échappe aussi les retours à la ligne internes en `\<retour à la ligne>`,
+# seule syntaxe qu'accepte `sed -e "s|X|VALEUR|g"` pour un texte de
+# remplacement multi-lignes (ex. workspace_security_args_json() ci-dessus) —
+# no-op sur une valeur mono-ligne (rien à remplacer). Fait en bash pur
+# (`${var//motif/remplacement}`, bash 3.2-safe) plutôt qu'avec un deuxième
+# `sed` : l'idiome GNU sed `:a;N;$!ba;s/\n/\\\n/g` pour joindre les lignes
+# n'est pas portable sur BSD sed (macOS), qui interprète `:a;N;...` comme une
+# seule étiquette malformée plutôt que trois commandes distinctes.
 _sed_escape_replacement() {
-    printf '%s' "$1" | sed -e 's/[\&|]/\\&/g'
+    local escaped nl
+    escaped="$(printf '%s' "$1" | sed -e 's/[\&|]/\\&/g')"
+    nl=$'\n'
+    printf '%s' "${escaped//$nl/\\$nl}"
 }
 
 # --- Allocation de subnet par (projet, client) ---

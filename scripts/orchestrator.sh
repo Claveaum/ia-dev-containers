@@ -66,11 +66,17 @@ render_devcontainer() {
     # est un jeton fixe posé par l'adaptateur (lib.sh) : sûr à interpoler tel
     # quel dans le motif sed (aucun caractère spécial), contrairement à sa
     # valeur de remplacement (PKG_VOLUME) qui passe par _sed_escape_replacement.
+    # __WORKSPACE_SECURITY_ARGS__ : contrat d'isolation (cap-drop, tmpfs,
+    # read-only, security-opt) rendu en JSON depuis WORKSPACE_SECURITY_ARGS
+    # (scripts/common.sh), identique aux flags que start_workspace() applique
+    # via `podman run` — une seule source pour les deux chemins de lancement.
     sed \
         -e "s|__NETWORK_NAME__|$(_sed_escape_replacement "$NETWORK_NAME")|g" \
         -e "s|__PROJECT_ROOT__|$(_sed_escape_replacement "$PROJECT_ROOT")|g" \
         -e "s|${PKG_VOLUME_PLACEHOLDER}|$(_sed_escape_replacement "$PKG_VOLUME")|g" \
         -e "s|__SELF_PROTECT_MOUNT__|$(_sed_escape_replacement "$self_protect_line")|g" \
+        -e "s|__WORKSPACE_SECURITY_ARGS__|$(_sed_escape_replacement "$(workspace_security_args_json)")|g" \
+        -e "s|__CACHE_VOLUME__|$(_sed_escape_replacement "$CACHE_VOLUME")|g" \
         "$template" > "$out"
 }
 
@@ -163,21 +169,13 @@ start_workspace() {
     _collect_arg_lines self_protect_mount_arg
     local self_mount_args=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
 
-    # --security-opt=label=disable : /workspace est un bind-mount du vrai
-    # projet hôte (PROJECT_ROOT), pas un volume Podman. Sous SELinux
-    # (Fedora/RHEL), un bind-mount d'un chemin arbitraire est refusé sans
-    # relabeling. L'alternative `:Z` sur le -v relabelerait récursivement
-    # les fichiers RÉELS du projet sur le disque (effet de bord persistant
-    # hors du sandbox) ; label=disable désactive la confinement SELinux
-    # pour ce conteneur sans toucher aux labels du projet — vérifié : les
-    # deux permettent l'écriture, seul label=disable laisse `ls -Z` sur le
-    # projet hôte inchangé. No-op inoffensif sur les hôtes sans SELinux.
+    # WORKSPACE_SECURITY_ARGS (scripts/common.sh) : même contrat d'isolation
+    # que .devcontainer/devcontainer.json.template (runArgs), généré depuis
+    # cette même valeur par render_devcontainer() — voir le commentaire sur
+    # WORKSPACE_SECURITY_ARGS pour le détail de chaque flag.
     podman run --rm -it --name "$WORKSPACE_CONTAINER" \
         --user "$(id -u):$(id -g)" --userns=keep-id \
-        --cap-drop=ALL \
-        --security-opt=no-new-privileges \
-        --security-opt=label=disable \
-        --read-only --tmpfs=/tmp --tmpfs=/run \
+        "${WORKSPACE_SECURITY_ARGS[@]}" \
         --network="$NETWORK_NAME" \
         -v "${PROJECT_ROOT}:/workspace" \
         ${self_mount_args[@]+"${self_mount_args[@]}"} \

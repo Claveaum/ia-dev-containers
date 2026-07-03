@@ -45,7 +45,7 @@
       "type": "volume"
     },
     {
-      "source": "copilot-cache",
+      "source": "__CACHE_VOLUME__",
       "target": "/home/devuser/.cache",
       "type": "volume"
     }
@@ -53,17 +53,14 @@
 
   "runArgs": [
     "--userns=keep-id",
-    "--security-opt=no-new-privileges",
-    // Bind-mount d'un chemin hôte arbitraire : sous SELinux (Fedora/RHEL),
-    // refusé sans relabeling. `label=disable` désactive le confinement
-    // SELinux pour ce conteneur sans modifier les labels du projet hôte
-    // (contrairement à un `:Z` sur workspaceMount, qui les relabelerait
-    // récursivement sur disque). No-op sur les hôtes sans SELinux.
-    "--security-opt=label=disable",
-    "--cap-drop=ALL",
-    "--read-only",
-    "--tmpfs=/tmp",
-    "--tmpfs=/run",
+    // Les flags suivants sont le contrat d'isolation du conteneur workspace
+    // (cap-drop, read-only, tmpfs, security-opt) — générés depuis
+    // WORKSPACE_SECURITY_ARGS (scripts/common.sh) par render_devcontainer()
+    // pour rester identiques aux flags que start_workspace() applique via
+    // `podman run` (scripts/orchestrator.sh). Voir le commentaire sur
+    // WORKSPACE_SECURITY_ARGS pour le détail de chaque flag (notamment
+    // pourquoi `security-opt=label=disable` plutôt que `:Z` sur workspaceMount).
+__WORKSPACE_SECURITY_ARGS__
     "--network=__NETWORK_NAME__",
     "-e=HTTP_PROXY=http://gateway:3128",
     "-e=HTTPS_PROXY=http://gateway:3128",

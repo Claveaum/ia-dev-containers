@@ -56,6 +56,15 @@ two_line_result=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
 assert_eq "_collect_arg_lines émetteur 2 lignes (2 éléments)" "2" "${#two_line_result[@]}"
 assert_eq "_collect_arg_lines préserve l'ordre" "-v" "${two_line_result[0]}"
 
+# --- workspace_security_args_json (contrat d'isolation, rendu JSON) ---
+expected_security_json='    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--security-opt=label=disable",
+    "--read-only",
+    "--tmpfs=/tmp",
+    "--tmpfs=/run",'
+assert_eq "workspace_security_args_json (6 flags, JSON)" "$expected_security_json" "$(workspace_security_args_json)"
+
 # --- _sanitize_name ---
 assert_eq "sanitize_name minuscule+tirets" "at-t-project" "$(_sanitize_name "AT&T Project")"
 
