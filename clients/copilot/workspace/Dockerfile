@@ -39,6 +39,10 @@ ENV NPM_CONFIG_CACHE=/home/devuser/.cache/npm
 COPY --chmod=0755 scripts/security-tests.sh /security-tests.sh
 COPY clients/copilot/scripts/lib.sh /lib.sh
 
+# ~/.npm-global est le PKG_VOLUME_TARGET de ce client (voir scripts/lib.sh) :
+# ni générique ni partagé avec mistral-vibe, donc préparé ici et non plus
+# dans workspace-base/Dockerfile (voir son commentaire).
+#
 # Un volume Podman nommé fraîchement créé est vide au premier mount : sans
 # ces répertoires déjà présents dans l'image, npm (y compris en --dry-run)
 # échoue avec ENOENT sur .npm-global/lib avant même toute tentative
@@ -57,6 +61,7 @@ COPY clients/copilot/scripts/lib.sh /lib.sh
 # détail — vécu en prod avec `npm install -g @github/copilot` EACCES sur
 # ~/.cache/npm).
 RUN /prepare-state-dir.sh \
+    /home/devuser/.npm-global \
     /home/devuser/.npm-global/lib \
     /home/devuser/.npm-global/bin \
     /home/devuser/.copilot

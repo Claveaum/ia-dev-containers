@@ -1,10 +1,12 @@
 #!/bin/sh
 # Prépare un répertoire d'état persistant (paquets installés ou session/jeton
 # d'un CLI) avant son tout premier montage en volume Podman nommé. Recette
-# unique appelée par workspace-base/Dockerfile (.local, .cache, .npm-global)
-# et par les overlays clients pour leurs EXTRA_VOLUMES (ex. clients/copilot/
-# workspace/Dockerfile : ~/.copilot, ~/.npm-global/{lib,bin}) — ne pas
-# reconstituer ce mkdir/chown/chmod à la main ailleurs.
+# unique appelée par workspace-base/Dockerfile pour .cache (seul chemin
+# réellement générique, partagé par tout client) et par chaque overlay client
+# pour son propre PKG_VOLUME_TARGET et ses éventuels EXTRA_VOLUMES (ex.
+# clients/mistral-vibe/workspace/Dockerfile : ~/.local ; clients/copilot/
+# workspace/Dockerfile : ~/.npm-global, ~/.npm-global/{lib,bin}, ~/.copilot)
+# — ne pas reconstituer ce mkdir/chown/chmod à la main ailleurs.
 #
 # Le chmod 2775 (et pas 755, ce que ferait un simple chown -R devuser:devuser)
 # est le point non-obvious : `--userns=keep-id` (scripts/common.sh,

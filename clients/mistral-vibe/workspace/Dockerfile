@@ -30,6 +30,14 @@ ENV MISTRAL_API_URL=https://api.mistral.ai
 COPY --chmod=0755 scripts/security-tests.sh /security-tests.sh
 COPY clients/mistral-vibe/scripts/lib.sh /lib.sh
 
+# ~/.local est le PKG_VOLUME_TARGET de ce client (voir scripts/lib.sh) : ni
+# générique ni partagé avec copilot, donc préparé ici et non plus dans
+# workspace-base/Dockerfile (voir son commentaire) — sans ce
+# prepare-state-dir.sh, le premier montage du volume nommé sur ~/.local
+# serait root:root, illisible en écriture par pip (même piège que
+# ~/.copilot côté client Copilot).
+RUN /prepare-state-dir.sh /home/devuser/.local
+
 VOLUME /home/devuser/.local
 VOLUME /home/devuser/.cache
 

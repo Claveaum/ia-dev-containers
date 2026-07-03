@@ -72,13 +72,17 @@ RUN echo "${USERNAME} ALL=(ALL) PASSWD: ALL" > /etc/sudoers.d/${USERNAME} && \
 COPY scripts/prepare-state-dir.sh /prepare-state-dir.sh
 RUN chmod +x /prepare-state-dir.sh
 
-# Voir prepare-state-dir.sh pour le détail (chmod 2775, pas un simple chown) :
-# nécessaire pour qu'un host dont l'UID diffère de ${USER_UID} (macOS) puisse
-# quand même écrire dans ces volumes via --userns=keep-id.
+# Seul .cache est réellement générique (CACHE_VOLUME, monté sans condition
+# pour tout client — voir scripts/common.sh: start_workspace()). .local et
+# .npm-global sont chacun le PKG_VOLUME_TARGET d'UN SEUL client (mistral-vibe,
+# copilot) : les préparer ici les ferait passer pour génériques alors qu'ils
+# ne le sont pas — chaque overlay client prépare désormais son propre
+# PKG_VOLUME_TARGET (voir clients/*/workspace/Dockerfile), pour qu'un futur
+# client avec un PKG_VOLUME_TARGET inédit ne se retrouve pas avec un
+# répertoire root:root non préparé au premier montage (voir prepare-state-dir.sh
+# pour le piège du volume nommé fraîchement créé).
 RUN PREPARE_STATE_DIR_USER=${USERNAME} /prepare-state-dir.sh \
-    /home/${USERNAME}/.local \
-    /home/${USERNAME}/.cache \
-    /home/${USERNAME}/.npm-global
+    /home/${USERNAME}/.cache
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && chown ${USERNAME}:${USERNAME} /entrypoint.sh
