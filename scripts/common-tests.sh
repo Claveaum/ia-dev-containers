@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PASS=0
 FAIL=0
+SKIP=0
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
     if [ "$expected" = "$actual" ]; then
@@ -23,6 +24,17 @@ assert_eq() {
         echo "   obtenu  : $(printf '%q' "$actual")"
         FAIL=$((FAIL + 1))
     fi
+}
+
+# Résultat ignoré (ni ✅ ni ❌) : ce projet n'a aucune dépendance hôte hors
+# Podman+bash (voir README, tableau Plateformes hôte) — un test qui a besoin
+# d'un parseur JSON ne doit pas devenir un nouveau prérequis obligatoire.
+# Compté à part pour rester visible sans faire échouer la suite sur un hôte
+# minimal.
+skip_note() {
+    local desc="$1" reason="$2"
+    echo "⚠️  $desc — ignoré ($reason)"
+    SKIP=$((SKIP + 1))
 }
 
 CLIENT_NAME="test-client"
@@ -117,6 +129,12 @@ unset IA_SELF_MOUNT_RW
 # devcontainer.json réellement généré par le dernier `run.sh up` de
 # l'utilisateur (fichier généré, non suivi par git, mais potentiellement
 # ouvert dans VS Code) avec des valeurs de test.
+#
+# _render_devcontainer_orphans() ne détecte qu'UNE forme de corruption (un
+# jeton oublié, encore visible tel quel). Une corruption qui mange une
+# virgule ou rate un échappement (voir _sed_escape_replacement) ne laisse
+# aucun jeton orphelin et passerait ce test silencieusement — d'où le
+# parseur JSON(C) ci-dessous, en complément, pas en remplacement.
 # shellcheck source=orchestrator.sh
 source "$SCRIPT_DIR/orchestrator.sh"
 
@@ -124,6 +142,40 @@ _render_devcontainer_orphans() {
     local out="$1"
     grep -oE '__[A-Z_]+__' "$out" 2>/dev/null | sort -u | tr '\n' ' ' | sed -e 's/ $//'
 }
+
+# Détecte le premier parseur JSON disponible sur l'hôte, par ordre de
+# disponibilité probable (macOS/Linux fournissent python3 par défaut ; jq est
+# l'idiome bash standard mais pas préinstallé partout ; node est le moins
+# probable côté hôte). Chaîne vide si aucun des trois n'est présent.
+_json_parser_cmd() {
+    if command -v python3 >/dev/null 2>&1; then
+        echo python3
+    elif command -v jq >/dev/null 2>&1; then
+        echo jq
+    elif command -v node >/dev/null 2>&1; then
+        echo node
+    fi
+}
+
+# Valide que le JSON(C) produit par render_devcontainer() parse sans erreur.
+# Ne retire que les lignes ENTIÈREMENT commentaires (après espaces de tête) :
+# un strip naïf de tout ce qui suit "//" corromprait la valeur JSON réelle
+# "http://gateway:3128" présente dans postStartCommand des deux templates.
+_render_devcontainer_json_valid() {
+    local parser="$1" file="$2" stripped status
+    stripped="$(mktemp)"
+    grep -vE '^[[:space:]]*//' "$file" > "$stripped"
+    case "$parser" in
+        python3) python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$stripped" 2>/dev/null ;;
+        jq)      jq empty "$stripped" 2>/dev/null ;;
+        node)    node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$stripped" 2>/dev/null ;;
+    esac
+    status=$?
+    rm -f "$stripped"
+    return "$status"
+}
+
+_json_parser="$(_json_parser_cmd)"
 
 for _client in mistral-vibe copilot; do
     _real_client_root="$SCRIPT_DIR/../clients/$_client"
@@ -141,9 +193,25 @@ for _client in mistral-vibe copilot; do
     assert_eq "render_devcontainer ($_client) : fichier produit" "oui" "$([ -f "$_out" ] && echo oui || echo non)"
     assert_eq "render_devcontainer ($_client) : aucun __TOKEN__ orphelin" "" "$(_render_devcontainer_orphans "$_out")"
 
+    if [ -n "$_json_parser" ]; then
+        if _render_devcontainer_json_valid "$_json_parser" "$_out"; then
+            echo "✅ render_devcontainer ($_client) : JSON(C) valide ($_json_parser)"
+            PASS=$((PASS + 1))
+        else
+            echo "❌ render_devcontainer ($_client) : JSON(C) invalide selon $_json_parser"
+            FAIL=$((FAIL + 1))
+        fi
+    else
+        skip_note "render_devcontainer ($_client) : validité JSON(C)" "aucun de python3/jq/node trouvé sur l'hôte"
+    fi
+
     rm -rf "$_tmp_client_root"
 done
 
 echo ""
-echo "Résultat : $PASS réussis, $FAIL échoués"
+if [ "$SKIP" -gt 0 ]; then
+    echo "Résultat : $PASS réussis, $FAIL échoués, $SKIP ignorés (aucun parseur JSON trouvé sur l'hôte)"
+else
+    echo "Résultat : $PASS réussis, $FAIL échoués"
+fi
 [ "$FAIL" -eq 0 ]
