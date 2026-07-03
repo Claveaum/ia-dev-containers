@@ -8,25 +8,25 @@ Conteneurs Podman sécurisés (deux conteneurs, `gateway` + `workspace`) pour fa
 - **`workspace`** : exécute le CLI IA. Attaché uniquement à un réseau Podman `--internal` (aucune route sortante par défaut), `cap-drop=ALL`, `--read-only`, non-root. `/workspace` est un **bind-mount direct** du projet hôte (pas une copie) — voir les avertissements du README sur les conséquences pour `ia-dev-containers/` lui-même.
 - `gateway-base/` et `workspace-base/` : images génériques, **partagées entre tous les clients et tous les projets**. `clients/<client>/{gateway,workspace}/` : overlays spécifiques à un client (allowlist, dépendances du CLI).
 - Réseau, conteneurs et images overlay sont scopés **par projet** (nom déduit du dossier contenant la copie) ; les images `*-base` restent globales.
-- **Module profond d'orchestration** (voir `/codebase-design`) : `scripts/orchestrator.sh` (point d'entrée unique `orchestrator_main()`) et `scripts/security-tests-common.sh` portent toute la logique générique du sandbox (build, mounts, doctor, batterie de tests). Chaque client n'expose qu'un adaptateur mince : `clients/<client>/scripts/lib.sh` (données : `CLIENT_NAME`, volume de paquets, domaines testés, `SECRETS`, callback `client_package_manager_tests()`), et des `run.sh`/`security-tests.sh` qui ne font que déléguer. Ne pas dupliquer de logique dans un `lib.sh` de client — si ce n'est pas spécifique à un client, ça va dans `scripts/`.
+- **Module profond d'orchestration** (voir `/codebase-design`) : `scripts/orchestrator.sh` (point d'entrée unique `orchestrator_main()`) et `scripts/security-tests.sh` portent toute la logique générique du sandbox (build, mounts, doctor, batterie de tests). `gateway-base/scripts/gateway-checks.sh` porte les vérifications côté gateway, également générique. Chaque client n'expose qu'un adaptateur mince : `clients/<client>/scripts/lib.sh` (données : `CLIENT_NAME`, volume de paquets, domaines testés, `SECRETS`, callback `client_package_manager_tests()`) et `run.sh` (délègue à `orchestrator.sh`). Ne pas dupliquer de logique dans un `lib.sh` de client, ni recréer un fichier par client pour quelque chose de générique — si ce n'est pas spécifique à un client, ça va dans `scripts/` ou `gateway-base/`.
 
 ## Structure
 
 ```
-gateway-base/          # image générique gateway (Squid, nftables)
+gateway-base/                     # image générique gateway (Squid, nftables)
+  scripts/gateway-checks.sh       # vérifications côté gateway, génériques (podman exec ... /gateway-checks.sh)
 workspace-base/        # image générique workspace (CLI IA)
 scripts/                          # orchestrateur générique, partagé par tous les clients
-  common.sh                       # gabarits de noms + auto-protection (côté hôte)
+  common.sh                       # gabarits de noms + auto-protection + _collect_arg_lines() (côté hôte)
   common-tests.sh                 # tests rapides sans Podman de common.sh
   orchestrator.sh                 # up|shell|test|down|secrets|doctor — orchestrator_main()
-  security-tests-common.sh        # batterie de tests générique (copiée dans l'image workspace)
+  security-tests.sh               # batterie de tests générique (copiée dans l'image workspace, source /lib.sh)
 clients/<nom>/
-  gateway/             # overlay : allowlist de domaines
-  workspace/           # overlay : dépendances du client (Python, Node...) — COPY lib.sh/security-tests*.sh au build
+  gateway/             # overlay : allowlist de domaines uniquement
+  workspace/           # overlay : dépendances du client (Python, Node...) — COPY lib.sh + scripts/security-tests.sh au build
   scripts/
     lib.sh             # adaptateur : CLIENT_NAME, volume de paquets, domaines testés, SECRETS, callback de test
     run.sh             # point d'entrée mince : source lib.sh + common.sh + orchestrator.sh
-    security-tests.sh  # point d'entrée mince (dans le conteneur) : source lib.sh + security-tests-common.sh
   .devcontainer/devcontainer.json.template
   .env.example
 docs/agents/           # config lue par les skills d'ingénierie (voir plus bas)
@@ -46,7 +46,7 @@ docs/{macos,windows}.md
 
 - Jamais de `-e CLE=valeur` pour un secret — `podman secret create` (repli `.env`).
 - Ne jamais installer le CLI IA lui-même au build d'une image `workspace` (le proxy `HTTP_PROXY` n'existe qu'au runtime) — toujours au runtime (`pip install --user`, `npm install --prefix`).
-- Un nouveau client s'ajoute en copiant `clients/mistral-vibe/scripts/{lib.sh,run.sh,security-tests.sh}` : seul `lib.sh` doit être adapté (`CLIENT_NAME` et le reste des données propres au client) — `run.sh`/`security-tests.sh` se copient tels quels, ils délèguent entièrement à `scripts/orchestrator.sh`/`scripts/security-tests-common.sh`. Le Dockerfile `workspace/` doit `COPY` `lib.sh` + les deux `security-tests*.sh` (contexte de build = racine du dépôt).
+- Un nouveau client s'ajoute en copiant `clients/mistral-vibe/scripts/{lib.sh,run.sh}` : seul `lib.sh` doit être adapté (`CLIENT_NAME` et le reste des données propres au client) — `run.sh` se copie tel quel, il délègue entièrement à `scripts/orchestrator.sh`. `security-tests.sh` et `gateway-checks.sh` sont déjà partagés (`scripts/`, `gateway-base/`) — rien à créer pour eux. Le Dockerfile `workspace/` doit `COPY` `lib.sh` + `scripts/security-tests.sh` (contexte de build = racine du dépôt).
 - `./scripts/common-tests.sh` (rapide, sans Podman) pour vérifier la logique pure de `common.sh` (noms de ressources, auto-protection) ; `run.sh up && run.sh test` reste le seul test qui vérifie les garanties réelles du sandbox (isolation réseau, non-root, lecture seule) — toute modification doit être validée par les deux, pas seulement une relecture du code. Ce projet documente explicitement ce qui est vérifié vs. non vérifié (ex. macOS/Windows expérimentaux, session Copilot authentifiée non testée).
 
 ## Conventions de commit

@@ -2,10 +2,12 @@
 set -uo pipefail
 
 # =============================================================================
-# IA Dev Container - Tests de sécurité génériques (à exécuter DANS le
-# workspace). Partagé entre tous les clients — copié dans l'image à côté de
-# lib.sh (le client) et security-tests.sh (le point d'entrée, qui source
-# lib.sh puis ce fichier). Suppose déjà définis par lib.sh :
+# IA Dev Container - Tests de sécurité (à exécuter DANS le workspace). Point
+# d'entrée fixe attendu par start_workspace() (scripts/orchestrator.sh) :
+# COPY'd en /security-tests.sh par le Dockerfile de chaque client, à côté de
+# /lib.sh (l'adaptateur du client, sourcé ci-dessous en premier). Partagé
+# entre tous les clients — aucun contenu spécifique à un client ici, tout ce
+# qui varie vient de lib.sh, déjà défini au moment où ce script s'exécute :
 #   TEST_DOMAIN_PRIMARY    domaine allowlisté qui doit réussir (échec dur sinon)
 #   TEST_DOMAIN_SECONDARY  domaine allowlisté propre au service du client
 #                          (avertissement seulement si bloqué, pas un échec dur)
@@ -16,6 +18,10 @@ set -uo pipefail
 # Modèle à deux conteneurs : ce script ne teste plus jamais localhost, il
 # vérifie l'accès réel au gateway (HTTP_PROXY) sur le réseau interne.
 # =============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib.sh"
 
 PASS=0
 FAIL=0

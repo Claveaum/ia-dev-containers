@@ -81,7 +81,7 @@ ENV IA_CLIENT=unknown
 # Une ENV figée ici casserait tout `apk add`/`pip install` ultérieur au build
 # (apk respecte HTTP_PROXY et tenterait de résoudre un hôte "gateway" qui
 # n'existe pas encore). Le proxy est injecté uniquement au runtime par
-# clients/*/scripts/run.sh (proxy_url() dans lib.sh).
+# scripts/orchestrator.sh: start_workspace() (proxy_url() dans scripts/common.sh).
 ENV NO_PROXY=localhost,127.0.0.1
 
 # Certains outils ignorent le magasin système par défaut (CA vendorisée) :

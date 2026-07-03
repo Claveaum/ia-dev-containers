@@ -39,16 +39,19 @@ RUN id nobody 2>/dev/null || (addgroup -g 65534 nobody && \
 COPY config/squid.conf /etc/squid/squid.conf
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/gateway.nft /etc/nftables/gateway.nft
+# Aucun contenu spécifique à un client (voir son propre commentaire) :
+# copié ici une fois plutôt que dupliqué dans chaque clients/<client>/gateway/.
+COPY scripts/gateway-checks.sh /gateway-checks.sh
 
 # 644 (pas 640) : en Phase 1 Squid démarre directement en "nobody", qui
 # doit pouvoir lire ce fichier sans chown préalable. Aucun secret dedans
 # (seulement des ACL), donc lisible par tous est acceptable.
 RUN chmod 644 /etc/squid/squid.conf && \
-    chmod +x /entrypoint.sh
+    chmod +x /entrypoint.sh /gateway-checks.sh
 
 # Pas de USER ici : entrypoint.sh décide au runtime (root -> nftables puis
 # abandon de privilèges, ou déjà non-root -> lancement direct de Squid).
-# Voir clients/*/scripts/run.sh (GATEWAY_HARDENED=0|1).
+# Voir scripts/orchestrator.sh: start_gateway() (GATEWAY_HARDENED=0|1).
 
 ENV IA_ROLE=gateway
 EXPOSE 3128

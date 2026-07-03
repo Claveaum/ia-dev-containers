@@ -152,23 +152,16 @@ start_workspace() {
     local env_args=()
     [ -f "$env_file" ] && env_args+=(--env-file "$env_file")
 
-    # while/read plutôt que `mapfile` (bash >=4) : macOS fournit bash 3.2 en
-    # /bin/bash par défaut, où `mapfile` n'existe pas. Les "${arr[@]}" plus bas
-    # sont gardés en "${arr[@]+...}" : sous `set -u`, bash 3.2 (contrairement
-    # à bash >=4.4) lève "unbound variable" sur l'expansion d'un tableau vide
-    # (vérifié empiriquement : podman run --rm -i bash:3.2 ...).
-    local secret_args_list=()
-    while IFS= read -r line; do
-        secret_args_list+=("$line")
-    done < <(secret_args)
+    # _collect_arg_lines() (scripts/common.sh) porte le boilerplate while/read
+    # bash-3.2-safe une seule fois pour les deux émetteurs ci-dessous.
+    _collect_arg_lines secret_args
+    local secret_args_list=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
 
     # Auto-protection : remonte ia-dev-containers/ en lecture seule sur
     # lui-même dans /workspace (voir scripts/common.sh: self_protect_mount_arg())
     # — vide si non applicable (relocalisé, dogfooding, IA_SELF_MOUNT_RW=1).
-    local self_mount_args=()
-    while IFS= read -r line; do
-        self_mount_args+=("$line")
-    done < <(self_protect_mount_arg)
+    _collect_arg_lines self_protect_mount_arg
+    local self_mount_args=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
 
     # --security-opt=label=disable : /workspace est un bind-mount du vrai
     # projet hôte (PROJECT_ROOT), pas un volume Podman. Sous SELinux

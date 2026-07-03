@@ -113,6 +113,28 @@ EOF
     fi
 }
 
+# Remplit COLLECTED_ARG_LINES (tableau global, scratch — pas de namerefs
+# `declare -n` ici : bash 3.2 sur macOS ne les supporte pas) avec la sortie
+# de la fonction émettrice passée en argument (ex. secret_args(),
+# self_protect_mount_arg() : une ligne par élément d'argument `podman run`,
+# rien du tout si non applicable). while/read plutôt que `mapfile` (bash
+# >=4) : macOS fournit bash 3.2 en /bin/bash par défaut, où `mapfile`
+# n'existe pas. L'appelant doit copier COLLECTED_ARG_LINES dans son propre
+# tableau local juste après l'appel (avant le prochain appel, qui l'écrase) :
+#   _collect_arg_lines secret_args
+#   local secret_args_list=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
+# Le repli `${arr[@]+"${arr[@]}"}` est nécessaire aussi bien ici qu'à la
+# copie : sous `set -u`, bash 3.2 (contrairement à bash >=4.4) lève "unbound
+# variable" sur l'expansion d'un tableau vide (vérifié empiriquement :
+# podman run --rm -i bash:3.2 ...).
+_collect_arg_lines() {
+    local emitter="$1"
+    COLLECTED_ARG_LINES=()
+    while IFS= read -r line; do
+        COLLECTED_ARG_LINES+=("$line")
+    done < <("$emitter")
+}
+
 # Échappe une valeur pour un usage sûr comme texte de remplacement dans
 # `sed 's|X|VALEUR|g'` : `&` (réinsère le texte matché) et `|` (le délimiteur
 # utilisé ici) doivent être échappés, ainsi que `\` lui-même. Sans ça, un
@@ -173,8 +195,8 @@ _self_protect_relpath() {
 
 # Arguments `-v` à passer à `podman run` pour activer l'auto-protection,
 # imprimés une ligne par argument (même idiome que secret_args() dans
-# run.sh, consommé via `while IFS= read -r line; do arr+=("$line"); done <
-# <(...)`) — pas de sortie du tout si non applicable.
+# scripts/orchestrator.sh, consommé via _collect_arg_lines() ci-dessus) —
+# pas de sortie du tout si non applicable.
 self_protect_mount_arg() {
     local rel
     rel="$(_self_protect_relpath)"

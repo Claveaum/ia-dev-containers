@@ -45,6 +45,17 @@ assert_eq "CACHE_VOLUME" "test-client-cache" "$CACHE_VOLUME"
 # scripts/common.sh pour le détail de la dérivation.
 assert_eq "PKG_VOLUME dérivé de PKG_VOLUME_TARGET" "test-client-local-mon-projet" "$PKG_VOLUME"
 
+# --- _collect_arg_lines (émetteur vide et émetteur à plusieurs lignes) ---
+_empty_emitter() { :; }
+_two_line_emitter() { printf -- '-v\nfoo:bar:ro\n'; }
+_collect_arg_lines _empty_emitter
+empty_result=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
+assert_eq "_collect_arg_lines émetteur vide (0 élément)" "0" "${#empty_result[@]}"
+_collect_arg_lines _two_line_emitter
+two_line_result=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
+assert_eq "_collect_arg_lines émetteur 2 lignes (2 éléments)" "2" "${#two_line_result[@]}"
+assert_eq "_collect_arg_lines préserve l'ordre" "-v" "${two_line_result[0]}"
+
 # --- _sanitize_name ---
 assert_eq "sanitize_name minuscule+tirets" "at-t-project" "$(_sanitize_name "AT&T Project")"
 
