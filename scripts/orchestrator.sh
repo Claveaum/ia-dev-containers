@@ -66,10 +66,16 @@ render_devcontainer() {
     # est un jeton fixe posé par l'adaptateur (lib.sh) : sûr à interpoler tel
     # quel dans le motif sed (aucun caractère spécial), contrairement à sa
     # valeur de remplacement (PKG_VOLUME) qui passe par _sed_escape_replacement.
-    # __WORKSPACE_SECURITY_ARGS__ : contrat d'isolation (cap-drop, tmpfs,
-    # read-only, security-opt) rendu en JSON depuis WORKSPACE_SECURITY_ARGS
-    # (scripts/common.sh), identique aux flags que start_workspace() applique
-    # via `podman run` — une seule source pour les deux chemins de lancement.
+    # __WORKSPACE_SECURITY_ARGS__ : contrat d'isolation (userns, cap-drop,
+    # tmpfs, read-only, security-opt) rendu en JSON depuis
+    # WORKSPACE_SECURITY_ARGS (scripts/common.sh), identique aux flags que
+    # start_workspace() applique via `podman run` — une seule source pour les
+    # deux chemins de lancement.
+    # __PROXY_URL__ : même valeur que start_workspace() (proxy_url(),
+    # scripts/common.sh), pour que GATEWAY_ADDR_MODE=static soit aussi
+    # respecté côté VS Code, pas seulement côté CLI.
+    # __CLIENT_NAME__ : CLIENT_NAME (posé par l'adaptateur, lib.sh) plutôt
+    # qu'une valeur codée en dur dans le template.
     sed \
         -e "s|__NETWORK_NAME__|$(_sed_escape_replacement "$NETWORK_NAME")|g" \
         -e "s|__PROJECT_ROOT__|$(_sed_escape_replacement "$PROJECT_ROOT")|g" \
@@ -77,6 +83,8 @@ render_devcontainer() {
         -e "s|__SELF_PROTECT_MOUNT__|$(_sed_escape_replacement "$self_protect_line")|g" \
         -e "s|__WORKSPACE_SECURITY_ARGS__|$(_sed_escape_replacement "$(workspace_security_args_json)")|g" \
         -e "s|__CACHE_VOLUME__|$(_sed_escape_replacement "$CACHE_VOLUME")|g" \
+        -e "s|__PROXY_URL__|$(_sed_escape_replacement "$(proxy_url)")|g" \
+        -e "s|__CLIENT_NAME__|$(_sed_escape_replacement "$CLIENT_NAME")|g" \
         "$template" > "$out"
 }
 
@@ -174,7 +182,7 @@ start_workspace() {
     # cette même valeur par render_devcontainer() — voir le commentaire sur
     # WORKSPACE_SECURITY_ARGS pour le détail de chaque flag.
     podman run --rm -it --name "$WORKSPACE_CONTAINER" \
-        --user "$(id -u):$(id -g)" --userns=keep-id \
+        --user "$(id -u):$(id -g)" \
         "${WORKSPACE_SECURITY_ARGS[@]}" \
         --network="$NETWORK_NAME" \
         -v "${PROJECT_ROOT}:/workspace" \

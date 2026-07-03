@@ -52,9 +52,8 @@
   ],
 
   "runArgs": [
-    "--userns=keep-id",
-    // Les flags suivants sont le contrat d'isolation du conteneur workspace
-    // (cap-drop, read-only, tmpfs, security-opt) — générés depuis
+    // Les flags suivants (userns, cap-drop, read-only, tmpfs, security-opt)
+    // sont le contrat d'isolation du conteneur workspace — générés depuis
     // WORKSPACE_SECURITY_ARGS (scripts/common.sh) par render_devcontainer()
     // pour rester identiques aux flags que start_workspace() applique via
     // `podman run` (scripts/orchestrator.sh). Voir le commentaire sur
@@ -62,9 +61,13 @@
     // pourquoi `security-opt=label=disable` plutôt que `:Z` sur workspaceMount).
 __WORKSPACE_SECURITY_ARGS__
     "--network=__NETWORK_NAME__",
-    "-e=HTTP_PROXY=http://gateway:3128",
-    "-e=HTTPS_PROXY=http://gateway:3128",
-    "-e=IA_CLIENT=copilot"
+    // L'URL du proxy ci-dessous est calculée par proxy_url() (scripts/
+    // common.sh), même valeur que start_workspace() — respecte
+    // GATEWAY_ADDR_MODE=static comme le chemin CLI, pas juste l'alias DNS
+    // "gateway". Placeholder substitué par render_devcontainer().
+    "-e=HTTP_PROXY=__PROXY_URL__",
+    "-e=HTTPS_PROXY=__PROXY_URL__",
+    "-e=IA_CLIENT=__CLIENT_NAME__"
   ],
 
   "postCreateCommand": "/security-tests.sh || echo '⚠️  Des tests ont échoué - vérifiez que ./scripts/run.sh up a bien été lancé AVANT d'\\''ouvrir ce dossier (le gateway doit déjà tourner).'",

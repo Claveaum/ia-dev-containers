@@ -23,8 +23,6 @@ ENV PATH="/home/devuser/.npm-global/bin:${PATH}"
 # seule, il faut le pointer explicitement vers un chemin inscriptible).
 ENV NPM_CONFIG_CACHE=/home/devuser/.cache/npm
 
-ENV IA_CLIENT=copilot
-
 # Contexte de build = racine du dépôt (voir build_images() dans
 # scripts/orchestrator.sh), pas clients/copilot/ : security-tests.sh est
 # partagé entre clients et vit hors de ce dossier.

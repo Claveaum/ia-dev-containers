@@ -22,7 +22,6 @@ ENV PYTHONUNBUFFERED=1
 # ~/.local, rien n'écrit dans le site-packages système que PEP 668 protège.
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-ENV IA_CLIENT=mistral-vibe
 ENV MISTRAL_API_URL=https://api.mistral.ai
 
 # Contexte de build = racine du dépôt (voir build_images() dans

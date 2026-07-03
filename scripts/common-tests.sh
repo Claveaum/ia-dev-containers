@@ -57,13 +57,22 @@ assert_eq "_collect_arg_lines émetteur 2 lignes (2 éléments)" "2" "${#two_lin
 assert_eq "_collect_arg_lines préserve l'ordre" "-v" "${two_line_result[0]}"
 
 # --- workspace_security_args_json (contrat d'isolation, rendu JSON) ---
-expected_security_json='    "--cap-drop=ALL",
+expected_security_json='    "--userns=keep-id",
+    "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     "--security-opt=label=disable",
     "--read-only",
     "--tmpfs=/tmp",
     "--tmpfs=/run",'
-assert_eq "workspace_security_args_json (6 flags, JSON)" "$expected_security_json" "$(workspace_security_args_json)"
+assert_eq "workspace_security_args_json (7 flags, JSON)" "$expected_security_json" "$(workspace_security_args_json)"
+
+# --- proxy_url (dns vs static) ---
+assert_eq "proxy_url en mode dns (défaut)" "http://gateway:3128" "$(proxy_url)"
+GATEWAY_ADDR_MODE="static"
+GATEWAY_IP="10.89.42.2"
+assert_eq "proxy_url en mode static" "http://10.89.42.2:3128" "$(proxy_url)"
+GATEWAY_ADDR_MODE="dns"
+unset GATEWAY_IP
 
 # --- _sanitize_name ---
 assert_eq "sanitize_name minuscule+tirets" "at-t-project" "$(_sanitize_name "AT&T Project")"

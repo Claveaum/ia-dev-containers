@@ -59,12 +59,18 @@ GATEWAY_ADDR_MODE="${GATEWAY_ADDR_MODE:-dns}"
 # 1 = Phase 2 (gateway root-in-userns -> nftables -> abandon de privilèges)
 GATEWAY_HARDENED="${GATEWAY_HARDENED:-0}"
 
-# Contrat d'isolation du conteneur workspace : appliqué tel quel par
-# start_workspace() (scripts/orchestrator.sh, `podman run`), et rendu en JSON
-# dans .devcontainer/devcontainer.json.template (runArgs) par
-# workspace_security_args_json() ci-dessous, via render_devcontainer() —
-# source unique pour que les deux chemins de lancement (CLI, VS Code) ne
-# puissent pas diverger sur les garanties de sécurité réelles.
+# Contrat d'isolation du conteneur workspace (namespace utilisateur inclus) :
+# appliqué tel quel par start_workspace() (scripts/orchestrator.sh, `podman
+# run`), et rendu en JSON dans .devcontainer/devcontainer.json.template
+# (runArgs) par workspace_security_args_json() ci-dessous, via
+# render_devcontainer() — source unique pour que les deux chemins de
+# lancement (CLI, VS Code) ne puissent pas diverger sur les garanties de
+# sécurité réelles.
+# `userns=keep-id` : mappe l'UID/GID de l'hôte dans le conteneur (au lieu de
+# root), pour que les fichiers créés dans /workspace appartiennent au bon
+# utilisateur côté hôte. Correspond à `--user "$(id -u):$(id -g)"`, posé à
+# part par start_workspace() (non templatable : la spec devcontainer utilise
+# containerUser/remoteUser à la place d'un `--user` littéral).
 # `security-opt=label=disable` : /workspace est un bind-mount d'un chemin
 # hôte arbitraire (PROJECT_ROOT), pas un volume Podman. Sous SELinux
 # (Fedora/RHEL), un bind-mount d'un chemin arbitraire est refusé sans
@@ -75,6 +81,7 @@ GATEWAY_HARDENED="${GATEWAY_HARDENED:-0}"
 # permettent l'écriture, seul label=disable laisse `ls -Z` sur le projet
 # hôte inchangé. No-op inoffensif sur les hôtes sans SELinux.
 WORKSPACE_SECURITY_ARGS=(
+    --userns=keep-id
     --cap-drop=ALL
     --security-opt=no-new-privileges
     --security-opt=label=disable
