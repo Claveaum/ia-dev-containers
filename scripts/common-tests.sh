@@ -70,6 +70,31 @@ two_line_result=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
 assert_eq "_collect_arg_lines émetteur 2 lignes (2 éléments)" "2" "${#two_line_result[@]}"
 assert_eq "_collect_arg_lines préserve l'ordre" "-v" "${two_line_result[0]}"
 
+# --- _collect_arg_lines : 3 appels d'affilée (même forme que start_workspace()) ---
+# Le test ci-dessus ne vérifie qu'un émetteur à la fois. Le vrai risque est
+# que start_workspace() (scripts/orchestrator.sh) enchaîne 3 appels
+# consécutifs (secret_args, self_protect_mount_arg, extra_volume_mount_args),
+# chacun devant être copié IMMÉDIATEMENT avant le suivant : COLLECTED_ARG_LINES
+# est un scratch global écrasé à chaque appel. Un futur refactor qui
+# grouperait les 3 appels avant de copier ferait silencieusement alias les 3
+# résultats sur le dernier — rien ne le détecterait sans ce test (les vrais
+# émetteurs sont tous les trois vides dans cet environnement synthétique,
+# ce qui masquerait justement ce bug). Émetteurs jetables distincts, pas les
+# vrais émetteurs de production : isole le test de la discipline de copie
+# elle-même, indépendamment de ce que ceux-ci renvoient par ailleurs.
+_alpha_emitter() { printf -- 'alpha-1\n'; }
+_beta_emitter() { printf -- 'beta-1\nbeta-2\n'; }
+_gamma_emitter() { printf -- 'gamma-1\ngamma-2\ngamma-3\n'; }
+_collect_arg_lines _alpha_emitter
+alpha_result=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
+_collect_arg_lines _beta_emitter
+beta_result=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
+_collect_arg_lines _gamma_emitter
+gamma_result=(${COLLECTED_ARG_LINES[@]+"${COLLECTED_ARG_LINES[@]}"})
+assert_eq "3 appels d'affilée : alpha intact après beta+gamma" "alpha-1" "${alpha_result[*]}"
+assert_eq "3 appels d'affilée : beta intact après gamma" "beta-1 beta-2" "${beta_result[*]}"
+assert_eq "3 appels d'affilée : gamma correct" "gamma-1 gamma-2 gamma-3" "${gamma_result[*]}"
+
 # --- workspace_security_args_json (contrat d'isolation, rendu JSON) ---
 expected_security_json='    "--userns=keep-id",
     "--cap-drop=ALL",
