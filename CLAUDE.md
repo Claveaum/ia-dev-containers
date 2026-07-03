@@ -41,6 +41,13 @@ scripts/common.sh      # utilitaires partagés entre clients
 - Un nouveau client s'ajoute en copiant `clients/mistral-vibe/scripts/{lib.sh,run.sh,security-tests.sh}` et en changeant `CLIENT_NAME` dans `lib.sh` — le reste (subnet, noms de ressources) en découle automatiquement.
 - Toute modification doit être validée par un run réel (`run.sh up && run.sh test`), pas seulement une relecture du code — ce projet documente explicitement ce qui est vérifié vs. non vérifié (ex. macOS/Windows expérimentaux, session Copilot authentifiée non testée).
 
+## Conventions de commit
+
+- **L'auteur d'un commit est toujours la personne qui commite, jamais un agent IA.** Objectif : pouvoir savoir qui a commité quoi si ce dépôt a plusieurs contributeurs humains — une identité générique type "Claude Code" écraserait cette information.
+- Aucune mention de Claude/Anthropic dans les messages de commit : pas de trailer `Co-Authored-By: Claude ...`, pas de `Claude-Session: ...`, pas de mention "Generated with Claude Code". Ceci **remplace** la convention par défaut de l'outil Claude Code qui ajoute normalement ce trailer.
+- Un agent qui commite pour le compte d'un utilisateur doit utiliser l'identité git de cet utilisateur (nom + email), jamais une identité par défaut de l'outil — sans jamais modifier `git config` (ni local ni global) pour y parvenir : passer `--author="Nom <email>"` et surcharger `GIT_COMMITTER_NAME`/`GIT_COMMITTER_EMAIL` en variables d'environnement sur la commande, ou (préférable, durable) demander à l'utilisateur de configurer lui-même `git config user.name`/`user.email` dans ce dépôt.
+- Historique réécrit le 2026-07-03 pour appliquer cette règle rétroactivement (tous les commits jusque-là attribués à "Claude Code <noreply@anthropic.com>" sont réattribués, trailers supprimés) ; ancienne référence conservée localement dans `refs/original/refs/heads/main` sur la machine où la réécriture a eu lieu.
+
 ## Agent skills
 
 ### Issue tracker
