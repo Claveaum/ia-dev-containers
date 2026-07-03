@@ -1,8 +1,9 @@
 FROM ia-dev-containers-workspace-base:latest
 
 # ---- Python 3 + pip, installation utilisateur uniquement ----
-# Alpine 3.20 fournit Python 3.12 sous le nom "python3" (pas de paquet
-# versionné "python3.11"/"py3.11-*", qui n'existe pas dans ce dépôt).
+# Alpine 3.24 (workspace-base) fournit Python 3.14 sous le nom "python3"
+# (pas de paquet versionné "python3.11"/"py3.11-*", qui n'existe pas dans ce
+# dépôt).
 RUN apk add --no-cache \
     python3 \
     py3-pip \

@@ -59,7 +59,7 @@ npm install -g @github/copilot
 copilot --version
 ```
 
-> Node.js ≥ 22 est requis par `@github/copilot` — c'est pour ça que ce client (contrairement à mistral-vibe) repose sur `workspace-base` en Alpine 3.21, la première version à fournir `nodejs` 22 nativement.
+> Node.js ≥ 22 est requis par `@github/copilot` — c'est pour ça que `workspace-base` (partagé avec mistral-vibe) doit rester sur Alpine ≥ 3.21, la première version à fournir `nodejs` 22 nativement (actuellement 3.24, `nodejs` 24).
 
 ### **Authentification**
 
@@ -119,9 +119,6 @@ podman exec $(podman ps --filter name=copilot- --filter name=-gateway --format '
 ## ❓ **FAQ**
 
 Voir la [FAQ mistral-vibe](../mistral-vibe/README.md#-faq) (identique : pourquoi deux conteneurs, pourquoi Podman, comment tester le proxy manuellement, dépannage des conteneurs).
-
-**Pourquoi `workspace-base` est en Alpine 3.21 alors que `gateway-base` est resté en 3.20 ?**
-`workspace-base` a été mis à jour vers 3.21 pour les deux clients (Node.js ≥ 22, requis par Copilot CLI, n'existe pas sur 3.20 ; mistral-vibe en bénéficie aussi sans régression). `gateway-base` reste en 3.20 : aucune dépendance Node côté gateway, pas de raison de faire bouger un composant déjà audité (Squid/nftables/abandon de privilèges).
 
 ---
 

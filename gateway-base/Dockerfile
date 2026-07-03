@@ -5,7 +5,13 @@
 # et applique l'allowlist de domaines. Ne contient jamais de code du CLI IA.
 # Les clients (ex: mistral-vibe) COPY leur propre allowed-urls.txt par-dessus.
 # =============================================================================
-FROM alpine:3.20
+# Bump délibéré 3.20 -> 3.24 (squid 6.x -> 7.5, nftables -> 1.1.6, su-exec
+# 0.3, sudo 1.9.17_p2) : revalidé en entier après ce bump (les deux phases,
+# les deux clients, GATEWAY_HARDENED=1 inclus — voir README, section
+# Sécurité). Même version que workspace-base désormais : plus de raison de
+# les faire diverger (l'asymétrie précédente ne venait que d'un bump
+# workspace-base ponctuel pour Node.js, voir ce fichier).
+FROM alpine:3.24
 
 # --- Confiance CA d'entreprise (optionnelle), partie 1/2 ---
 # Ajout "à la main" AVANT tout apk : sur un réseau qui intercepte le TLS

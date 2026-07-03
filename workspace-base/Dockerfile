@@ -5,13 +5,15 @@
 # uniquement au réseau interne dédié au projet (scopé par client+projet, voir
 # clients/*/scripts/lib.sh), ne peut joindre que le gateway.
 # Pas de squid/iptables ici : le filtrage réseau vit entièrement dans le
-# conteneur gateway (voir gateway-base/, resté en 3.20 - aucune dépendance
-# Node côté gateway, pas de raison de faire bouger un composant audité).
+# conteneur gateway (voir gateway-base/).
 #
-# 3.21 (et non 3.20) car le client Copilot a besoin de Node.js >= 22, que
-# seul Alpine >= 3.21 fournit nativement (`nodejs` = 22.23.0-r0).
+# Doit rester >= 3.21 : c'est la première version à fournir Node.js >= 22
+# nativement, requis par le client Copilot (mistral-vibe en bénéficie aussi
+# sans régression). Bump délibéré 3.21 -> 3.24 (nodejs 22.23.0 -> 24.17.0,
+# python3 3.12 -> 3.14) : revalidé en entier après ce bump (les deux
+# clients, voir README, section Sécurité).
 # =============================================================================
-FROM alpine:3.21
+FROM alpine:3.24
 
 # --- Confiance CA d'entreprise (optionnelle), partie 1/2 ---
 # Ajout "à la main" AVANT tout apk : sur un réseau qui intercepte le TLS

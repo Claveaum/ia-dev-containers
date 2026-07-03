@@ -98,7 +98,7 @@ mon-projet/                        # 🎯 Le projet que vous voulez sandboxer
 └── ...
 ```
 
-`gateway-base/` et `workspace-base/` sont partagés par les deux clients **et par tous les projets** (aucun contenu spécifique à un projet, un seul tag global profite du cache de layers). `gateway-base` reste sur Alpine 3.20 (Squid/nftables/abandon de privilèges déjà audités, aucune raison de le faire bouger). `workspace-base` est sur Alpine 3.21 (nécessaire pour Node.js ≥ 22, requis par Copilot CLI ; mistral-vibe en bénéficie aussi sans regression, revalidé après le bump).
+`gateway-base/` et `workspace-base/` sont partagés par les deux clients **et par tous les projets** (aucun contenu spécifique à un projet, un seul tag global profite du cache de layers). Les deux sont sur Alpine **3.24** (pin délibéré, pas `latest` : voir le commentaire en tête de chaque Dockerfile — reproductibilité des builds et audit des versions, pas de cible mobile sur des composants de sécurité comme Squid/nftables). `workspace-base` doit rester ≥ 3.21 (première version à fournir Node.js ≥ 22 nativement, requis par Copilot CLI ; mistral-vibe en bénéficie aussi sans régression). Bump 3.20/3.21 → 3.24 revalidé en entier (les deux phases, les deux clients).
 
 Les images overlay (gateway/workspace de chaque client), le réseau `--internal` et les conteneurs sont en revanche scopés **par projet** (voir [Isolation entre projets](#-isolation-entre-projets)) : deux copies de `ia-dev-containers` dans deux projets différents ne se marchent jamais dessus, y compris lancées en même temps.
 
