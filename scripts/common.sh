@@ -1,10 +1,13 @@
 #!/bin/bash
-# Fonctions génériques partagées par tous les clients (mistral-vibe, copilot,
-# et tout futur client). Sourcé par clients/*/scripts/lib.sh, qui doit déjà
-# avoir défini PROJECT_ROOT et CLIENT_NAME avant le `source` ; REPO_ROOT doit
-# aussi être défini par l'appelant (run.sh) pour localiser ce fichier (et pour
-# le calcul d'auto-protection ci-dessous, qui compare REPO_ROOT à
-# PROJECT_ROOT).
+# Fonctions et gabarits de noms génériques partagés par tous les clients
+# (mistral-vibe, copilot, et tout futur client), utilisés côté hôte
+# uniquement (jamais copié dans une image — voir scripts/orchestrator.sh
+# pour le moteur d'orchestration, et scripts/security-tests-common.sh pour
+# les vérifications côté conteneur). Sourcé par clients/*/scripts/run.sh,
+# après le lib.sh du client, qui doit déjà avoir défini PROJECT_ROOT,
+# CLIENT_NAME et PKG_VOLUME_TARGET avant le `source` ; REPO_ROOT doit aussi
+# être défini par l'appelant (run.sh) pour localiser ce fichier (et pour le
+# calcul d'auto-protection ci-dessous, qui compare REPO_ROOT à PROJECT_ROOT).
 # Doit être sourcé, pas exécuté directement.
 
 _sanitize_name() {
@@ -22,6 +25,93 @@ _sanitize_name() {
 # build` (tags en majuscule refusés) ou `podman network create`/`create
 # --name` (espaces refusés).
 PROJECT_NAME="$(_sanitize_name "${IA_PROJECT_NAME:-$(basename "$PROJECT_ROOT")}")"
+
+# --- Gabarits génériques de noms de ressources Podman, par (client, projet) ---
+# Identiques pour tous les clients aujourd'hui (aucune référence spécifique à
+# un client au-delà de CLIENT_NAME/PKG_VOLUME_TARGET, tous deux déjà posés
+# par l'adaptateur avant de sourcer ce fichier) — déclarés ici plutôt que
+# dans chaque lib.sh pour qu'un futur client n'ait pas à les redéclarer.
+GATEWAY_BASE_IMAGE="ia-dev-containers-gateway-base:latest"
+WORKSPACE_BASE_IMAGE="ia-dev-containers-workspace-base:latest"
+GATEWAY_IMAGE="ia-dev-containers-gateway-${CLIENT_NAME}-${PROJECT_NAME}:latest"
+WORKSPACE_IMAGE="ia-dev-containers-workspace-${CLIENT_NAME}-${PROJECT_NAME}:latest"
+NETWORK_NAME="ia-gw-internal-${CLIENT_NAME}-${PROJECT_NAME}"
+GATEWAY_CONTAINER="${CLIENT_NAME}-${PROJECT_NAME}-gateway"
+WORKSPACE_CONTAINER="${CLIENT_NAME}-${PROJECT_NAME}-workspace"
+CACHE_VOLUME="${CLIENT_NAME}-cache"
+
+# Volume des VRAIS paquets installés par le client (pip/npm/...), pas un
+# simple cache : scopé par projet, pour qu'un paquet compromis installé dans
+# un projet ne devienne pas silencieusement importable depuis un autre. Nom
+# dérivé de CLIENT_NAME + du dernier segment de PKG_VOLUME_TARGET (ex.
+# "/home/devuser/.local" -> "local") plutôt que déclaré tel quel par chaque
+# adaptateur — vérifié équivalent aux noms historiques ("mistral-vibe-local-
+# ${PROJECT_NAME}", "copilot-npm-global-${PROJECT_NAME}") pour ne pas
+# orpheliner les volumes déjà installés d'un utilisateur existant.
+PKG_VOLUME="${CLIENT_NAME}-$(basename "$PKG_VOLUME_TARGET" | sed -e 's/^\.//')-${PROJECT_NAME}"
+
+# dns   : le workspace joint le gateway via son alias réseau "gateway"
+#         (résolu par aardvark-dns sur le réseau interne).
+# static: repli sur l'IP fixe du gateway, si la résolution DNS pose problème.
+GATEWAY_ADDR_MODE="${GATEWAY_ADDR_MODE:-dns}"
+
+# 0 = Phase 1 (gateway non-root direct, pas de nftables)
+# 1 = Phase 2 (gateway root-in-userns -> nftables -> abandon de privilèges)
+GATEWAY_HARDENED="${GATEWAY_HARDENED:-0}"
+
+proxy_url() {
+    if [ "$GATEWAY_ADDR_MODE" = "static" ]; then
+        echo "http://${GATEWAY_IP}:3128"
+    else
+        echo "http://gateway:3128"
+    fi
+}
+
+# Remarque (documentation, pas une protection par chmod) : le workspace
+# n'est JAMAIS lancé avec -v /run/podman/podman.sock, -v /run/docker.sock,
+# ni --device. C'est ça, et pas un chmod interne au conteneur, qui empêche
+# l'accès aux sockets/devices de l'hôte.
+
+# Détection best-effort de la plateforme hôte et, sur macOS/Windows, de
+# l'état de la VM "podman machine" (Podman n'y tourne jamais nativement).
+# Sur Linux, ne fait rien (pas de VM) : retour immédiat, zéro changement
+# de comportement sur la plateforme déjà validée.
+# Non vérifié sur matériel macOS/Windows réel (voir docs/macos.md,
+# docs/windows.md) : la détection d'existence est fiable (testée y compris
+# sur Linux sans machine configurée), la détection de l'état "Running" est
+# volontairement best-effort/non bloquante.
+preflight_platform_check() {
+    local os
+    os="$(uname -s)"
+    case "$os" in
+        Linux) return 0 ;;
+        Darwin|MINGW*|MSYS*|CYGWIN*) ;;
+        *)
+            echo "⚠️  Plateforme hôte non reconnue ($os) — poursuite sans vérification podman machine." >&2
+            return 0
+            ;;
+    esac
+
+    local machine_names
+    machine_names="$(podman machine list -q 2>/dev/null || true)"
+    if [ -z "$machine_names" ]; then
+        cat >&2 <<'EOF'
+❌ Aucune VM "podman machine" détectée sur cette plateforme (macOS/Windows).
+   Podman a besoin d'une machine virtuelle Linux pour fonctionner ici. Lancez :
+     podman machine init
+     podman machine start
+   puis relancez cette commande. Voir docs/macos.md ou docs/windows.md.
+EOF
+        exit 1
+    fi
+
+    local machine_json
+    machine_json="$(podman machine list --format json 2>/dev/null || true)"
+    if [ -n "$machine_json" ] && ! printf '%s' "$machine_json" | grep -Eq '"Running":[[:space:]]*true'; then
+        echo "⚠️  Aucune VM podman machine ne semble démarrée. Si la suite échoue :" >&2
+        echo "     podman machine start" >&2
+    fi
+}
 
 # Échappe une valeur pour un usage sûr comme texte de remplacement dans
 # `sed 's|X|VALEUR|g'` : `&` (réinsère le texte matché) et `|` (le délimiteur

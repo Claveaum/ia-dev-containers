@@ -25,7 +25,12 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV IA_CLIENT=mistral-vibe
 ENV MISTRAL_API_URL=https://api.mistral.ai
 
-COPY --chmod=0755 scripts/security-tests.sh /security-tests.sh
+# Contexte de build = racine du dépôt (voir build_images() dans
+# scripts/orchestrator.sh), pas clients/mistral-vibe/ : security-tests-common.sh
+# est partagé entre clients et vit hors de ce dossier.
+COPY --chmod=0755 clients/mistral-vibe/scripts/security-tests.sh /security-tests.sh
+COPY --chmod=0755 scripts/security-tests-common.sh /security-tests-common.sh
+COPY clients/mistral-vibe/scripts/lib.sh /lib.sh
 
 VOLUME /home/devuser/.local
 VOLUME /home/devuser/.cache

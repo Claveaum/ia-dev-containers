@@ -68,8 +68,14 @@ mon-projet/                        # 🎯 Le projet que vous voulez sandboxer
 │   │   ├── Dockerfile
 │   │   └── scripts/entrypoint.sh
 │   │
-│   ├── clients/                    # 🎯 Solutions par client IA
-│   │   ├── mistral-vibe/           # Solution pour Mistral Vibe CLI (Python)
+│   ├── scripts/                    # 🧩 Orchestrateur générique, partagé par tous les clients
+│   │   ├── common.sh               # Gabarits de noms (image/réseau/volume) + auto-protection, côté hôte
+│   │   ├── common-tests.sh         # Tests rapides sans Podman de common.sh (./scripts/common-tests.sh)
+│   │   ├── orchestrator.sh         # up|shell|test|down|secrets|doctor — le seul point d'entrée : orchestrator_main()
+│   │   └── security-tests-common.sh  # Batterie de tests générique, copiée dans l'image workspace
+│   │
+│   ├── clients/                    # 🎯 Adaptateurs par client IA (seulement ce qui varie)
+│   │   ├── mistral-vibe/           # Adaptateur pour Mistral Vibe CLI (Python)
 │   │   │   ├── gateway/            # Overlay : allowlist de domaines spécifique
 │   │   │   │   ├── Dockerfile
 │   │   │   │   ├── config/allowed-urls.txt
@@ -77,15 +83,15 @@ mon-projet/                        # 🎯 Le projet que vous voulez sandboxer
 │   │   │   ├── workspace/          # Overlay : Python 3 + pip
 │   │   │   │   └── Dockerfile
 │   │   │   ├── scripts/
-│   │   │   │   ├── lib.sh          # Constantes partagées (réseau, images, noms — scopés par projet)
-│   │   │   │   ├── run.sh          # Orchestration : up|shell|test|down|secrets|doctor
-│   │   │   │   └── security-tests.sh
+│   │   │   │   ├── lib.sh          # Adaptateur : CLIENT_NAME, volume de paquets, domaines testés, SECRETS, callback de test
+│   │   │   │   ├── run.sh          # Point d'entrée mince : source lib.sh + common.sh + orchestrator.sh
+│   │   │   │   └── security-tests.sh  # Point d'entrée mince (dans le conteneur) : source lib.sh + security-tests-common.sh
 │   │   │   ├── .devcontainer/
 │   │   │   │   └── devcontainer.json.template  # Généré en devcontainer.json par `run.sh up`
 │   │   │   ├── .env.example        # Modèle pour les secrets (MISTRAL_API_KEY, ...)
 │   │   │   └── README.md
 │   │   │
-│   │   └── copilot/                # Solution pour GitHub Copilot CLI (Node.js)
+│   │   └── copilot/                # Adaptateur pour GitHub Copilot CLI (Node.js)
 │   │       └── (même structure que mistral-vibe/)
 │   │
 │   └── .gitignore                  # Ignore .env réels et devcontainer.json généré
@@ -234,10 +240,13 @@ Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME
 
 ### Ajouter un nouveau client IA
 
+L'orchestration (up/shell/test/down/secrets/doctor, construction des images, mounts, rendu du devcontainer, batterie de tests) est générique et vit dans `scripts/orchestrator.sh` + `scripts/security-tests-common.sh`, partagés par tous les clients. Un nouveau client n'a besoin d'écrire que ce qui varie réellement pour lui :
+
 1. Créer `clients/<nom-du-client>/gateway/` avec un `Dockerfile` (`FROM ia-dev-containers-gateway-base:latest`) + `config/allowed-urls.txt`.
-2. Créer `clients/<nom-du-client>/workspace/` avec un `Dockerfile` (`FROM ia-dev-containers-workspace-base:latest`), qui doit se terminer par `USER devuser` (tout ce qui précède, comme `apk add`, a besoin de root). N'installez jamais le CLI IA lui-même au build (comme pip/npm au runtime pour les clients existants) : `HTTP_PROXY` ne pointe vers un `gateway` joignable qu'au runtime, pas au moment du build.
-3. Copier et adapter `clients/mistral-vibe/scripts/{lib.sh,run.sh,security-tests.sh}` — changer `CLIENT_NAME` dans `lib.sh` (tout le reste, y compris l'allocation de subnet dans `10.89.0.0/16` via `ensure_network_and_ip`, en découle automatiquement, pas d'attribution manuelle de `/24` nécessaire).
-4. `./scripts/run.sh up` puis `./scripts/run.sh test` pour construire et valider réellement (pas seulement lire le code).
+2. Créer `clients/<nom-du-client>/workspace/` avec un `Dockerfile` (`FROM ia-dev-containers-workspace-base:latest`), qui doit se terminer par `USER devuser` (tout ce qui précède, comme `apk add`, a besoin de root). N'installez jamais le CLI IA lui-même au build (comme pip/npm au runtime pour les clients existants) : `HTTP_PROXY` ne pointe vers un `gateway` joignable qu'au runtime, pas au moment du build. Le Dockerfile doit aussi `COPY` `security-tests.sh`, `security-tests-common.sh` et `lib.sh` (voir `clients/mistral-vibe/workspace/Dockerfile` pour les chemins exacts — le contexte de build est la racine du dépôt, pas `clients/<nom-du-client>/`).
+3. Créer `clients/<nom-du-client>/scripts/lib.sh` — l'adaptateur, en copiant `clients/mistral-vibe/scripts/lib.sh` comme modèle. Il déclare uniquement : `CLIENT_NAME`, `PKG_VOLUME_TARGET` (chemin du volume de paquets, ex. `/home/devuser/.local`), `PKG_VOLUME_PLACEHOLDER` (jeton du template devcontainer), `PKG_INSTALL_LABEL`, `TEST_DOMAIN_PRIMARY`/`TEST_DOMAIN_SECONDARY`, `SECRETS`, et la fonction `client_package_manager_tests()` (vérifications propres au gestionnaire de paquets). Tout le reste (noms de ressources Podman, allocation de subnet dans `10.89.0.0/16` via `ensure_network_and_ip`) en découle automatiquement depuis `scripts/common.sh` — pas d'attribution manuelle de `/24` ni de nom de ressource nécessaire.
+4. Créer `clients/<nom-du-client>/scripts/run.sh` et `clients/<nom-du-client>/scripts/security-tests.sh` — copier ceux de `clients/mistral-vibe/scripts/` tels quels (ils ne contiennent plus rien de spécifique à un client, juste le câblage `source lib.sh` + délégation).
+5. `./scripts/run.sh up` puis `./scripts/run.sh test` pour construire et valider réellement (pas seulement lire le code).
 
 ---
 
