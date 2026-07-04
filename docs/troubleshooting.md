@@ -39,7 +39,7 @@ puis `podman machine stop && podman machine start`.
 
 **Alternative recommandée** : installer Podman directement dans une distribution WSL2 (`apt install podman` sous Ubuntu-on-WSL2), sans passer par `podman machine` — WSL2 fournit déjà un vrai noyau Linux, ce qui rend ce chemin équivalent à Linux natif et contourne ce bug de provider. Voir [docs/windows.md](windows.md).
 
-**Statut** : contournement rapporté par l'upstream Podman ; **non vérifié sur matériel Windows réel** dans le cadre de ce projet (voir le [tableau Plateformes hôte](../README.md#-plateformes-hôte) du README).
+**Statut** : contournement rapporté par l'upstream Podman ; **non vérifié sur matériel Windows réel** dans le cadre de ce projet (voir le [tableau Plateformes hôte](../README.md#️-plateformes-hôte) du README).
 
 ---
 

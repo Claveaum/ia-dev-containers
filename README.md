@@ -48,7 +48,10 @@ Un seul conteneur ne peut pas offrir à la fois un vrai accès réseau pour le p
 **Prérequis hôte** : [Podman](https://podman.io/) et `python3` (requis par l'orchestrateur `scripts/orchestrator.py`, côté hôte uniquement — voir [🖥️ Plateformes hôte](#️-plateformes-hôte) plus bas).
 
 ```bash
-# Depuis la racine de VOTRE projet (pas ce dépôt) :
+# Récupérez ce dépôt une bonne fois pour toutes, n'importe où sur votre machine :
+git clone https://github.com/Claveaum/ia-dev-containers.git
+
+# Puis, depuis la racine de VOTRE projet (pas ce dépôt) :
 cp -r /chemin/vers/ia-dev-containers .
 cd ia-dev-containers/clients/mistral-vibe
 
