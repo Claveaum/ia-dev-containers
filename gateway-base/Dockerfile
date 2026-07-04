@@ -57,7 +57,7 @@ RUN chmod 644 /etc/squid/squid.conf && \
 
 # Pas de USER ici : entrypoint.sh décide au runtime (root -> nftables puis
 # abandon de privilèges, ou déjà non-root -> lancement direct de Squid).
-# Voir scripts/orchestrator.sh: start_gateway() (GATEWAY_HARDENED=0|1).
+# Voir scripts/orchestrator.py: start_gateway() (GATEWAY_HARDENED=0|1).
 
 ENV IA_ROLE=gateway
 EXPOSE 3128
