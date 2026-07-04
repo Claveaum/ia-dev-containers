@@ -376,6 +376,17 @@ class MainHelpAndDispatchTests(unittest.TestCase):
         self.assertIn("Commandes :", out)
         self.assertEqual(err, "")
 
+    def test_line_buffers_stdout_when_stream_supports_it(self) -> None:
+        # Repéré en conditions réelles : sans ce réglage, un print() de
+        # progression (ex. "Gateway déjà démarré") peut s'afficher APRÈS la
+        # sortie d'un subprocess.run() lancé juste après, dès que stdout est
+        # redirigé/pipé (CI, `| tee`, agent non interactif) plutôt qu'un tty.
+        mock_stdout = unittest.mock.MagicMock()
+        with unittest.mock.patch.object(orch.sys, "argv", ["orchestrator.py", "--", "--help"]), \
+             unittest.mock.patch("sys.stdout", mock_stdout):
+            orch.main()
+        mock_stdout.reconfigure.assert_called_once_with(line_buffering=True)
+
     def test_short_help_flag_same_as_long(self) -> None:
         code, out, _ = self._run_main(["-h"])
         self.assertEqual(code, 0)
