@@ -1,6 +1,9 @@
 .env
 clients/*/.env
 
+# Bytecode compilé par scripts/orchestrator.py (Python, côté hôte).
+__pycache__/
+
 # Généré par render_devcontainer() (run.sh up) à partir du squelette partagé
 # scripts/devcontainer-skeleton.json.template : dépend de
 # PROJECT_ROOT/PROJECT_NAME, propre à chaque copie de ia-dev-containers, ne
