@@ -633,13 +633,9 @@ def handle_shell(config: Config, rest: list[str]) -> int:
 def handle_test(config: Config, rest: list[str]) -> int:
     no_build, rest = parse_no_build(rest)
     gateway_ip = _bring_up_gateway(config, no_build)
-    # flush() : stdout est bufferisé par bloc (pas ligne par ligne) dès
-    # que la sortie est redirigée/pipée (CI, `| tee`) — sans ça, ce print()
-    # se retrouverait affiché après la sortie du subprocess qui suit, qui
-    # écrit directement sur le fd hérité sans passer par ce buffer.
-    print("🔎==== Vérifications côté gateway ====🔎", flush=True)
+    print("🔎==== Vérifications côté gateway ====🔎")
     gateway_rc = subprocess.run(["podman", "exec", config.gateway_container, "/gateway-checks.sh"]).returncode
-    print("", flush=True)
+    print("")
     workspace_rc = start_workspace(config, gateway_ip, ["/security-tests.sh"])
     if gateway_rc != 0:
         print("❌ Vérifications côté gateway en échec.", file=sys.stderr)
@@ -750,6 +746,20 @@ COMMANDS: dict[str, Callable[[Config, list[str]], int]] = {
 
 
 def main() -> int:
+    # stdout est bufferisé par bloc (pas ligne par ligne) dès que la sortie
+    # est redirigée/pipée (CI, `| tee`, agent non interactif) — sans ça, les
+    # print() de progression (build_images(), start_gateway(), ...) peuvent
+    # s'afficher APRÈS la sortie du subprocess qui les suit, qui écrit
+    # directement sur le fd hérité sans passer par ce buffer. Repéré en
+    # conditions réelles : "Gateway déjà démarré" affiché après la sortie
+    # d'un `pip install` lancé juste après par `run.sh shell -- pip ...`.
+    # Ligne par ligne dès le début plutôt qu'un flush() ponctuel sur tel ou
+    # tel print() : la classe de bug touche tout print() suivi d'un
+    # subprocess.run(), pas un site précis. hasattr() : un test peut avoir
+    # remplacé sys.stdout par un io.StringIO, qui n'a pas de tampon de fd et
+    # n'expose donc pas reconfigure() — rien à ajuster dans ce cas.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
     argv = sys.argv[1:]
     if "--" not in argv:
         print(USAGE, file=sys.stderr)
