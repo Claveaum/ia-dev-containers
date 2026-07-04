@@ -52,10 +52,14 @@ else
     pass "Utilisateur non-root (UID=$(id -u))"
 fi
 
-if sudo -n true 2>/dev/null; then
-    fail "sudo est accessible sans mot de passe !"
+if command -v sudo &>/dev/null; then
+    if sudo -n true 2>/dev/null; then
+        fail "sudo est accessible sans mot de passe !"
+    else
+        pass "sudo installé mais nécessite un mot de passe"
+    fi
 else
-    pass "sudo nécessite un mot de passe (ou est bloqué)"
+    pass "sudo absent de l'image workspace"
 fi
 
 # =============================================================================
