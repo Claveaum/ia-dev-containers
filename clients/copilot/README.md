@@ -100,7 +100,7 @@ Dérivés de la [référence officielle GitHub](https://docs.github.com/en/copil
 >
 > ⚠️ **Contrainte assumée** : seuls les remotes git en **HTTPS** fonctionnent (le SSH, port 22, n'est pas relayé).
 
-Pour ajouter un domaine : éditer `gateway/config/allowed-urls.txt`, puis `./scripts/run.sh down && ./scripts/run.sh up`.
+Pour ajouter un domaine : éditer `gateway/config/allowed-urls.txt`, puis `./scripts/run.sh down && ./scripts/run.sh up`. Déjà léger : pas de `--purge-network` à ajouter (le réseau n'est pas concerné), et le rebuild est quasi instantané — seul l'overlay `gateway` (2 lignes de Dockerfile après le `COPY allowed-urls.txt`) est rejoué, le reste (`gateway-base`, `workspace-base`, l'overlay `workspace`) reste en cache de layers.
 
 ---
 

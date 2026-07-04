@@ -38,9 +38,12 @@ Sous-commandes disponibles :
 | Commande | Effet |
 |---|---|
 | `run.sh up` | build des images + création du réseau interne dédié à ce projet + démarrage du gateway |
-| `run.sh shell [-- CMD...]` | démarre (ou réutilise) le gateway, puis un workspace interactif (ou exécute `CMD`) |
-| `run.sh test` | démarre le workspace et exécute `security-tests.sh` |
+| `run.sh shell [--no-build] [-- CMD...]` | démarre (ou réutilise) le gateway, puis un workspace interactif (ou exécute `CMD`) ; `--no-build` saute la reconstruction des images (itération plus rapide, ne redétecte pas un Dockerfile/script modifié) |
+| `run.sh test [--no-build]` | démarre le workspace et exécute `security-tests.sh` + `gateway-checks.sh` |
+| `run.sh exec [-- CMD...]` | second shell (ou `CMD`) dans le workspace déjà lancé par un `run.sh shell` vivant dans un autre terminal (le workspace est éphémère, `exec` ne peut pas en démarrer un) |
 | `run.sh down [--purge-network]` | arrête les conteneurs (et supprime le réseau si demandé) |
+| `run.sh purge [--volumes]` | supprime images overlay + réseau + conteneurs de ce projet (tout reconstructible) ; `--volumes` supprime EN PLUS les volumes scopés par projet (paquets installés, cache) — irréversible |
+| `run.sh logs [gateway\|workspace]` | affiche les logs d'un des deux conteneurs (`gateway` par défaut) |
 | `run.sh secrets` | affiche le statut des secrets attendus |
 | `run.sh doctor` | diagnostic plateforme hôte + projet/réseau détecté pour cette copie |
 
@@ -127,7 +130,7 @@ chmod 600 .env
 - **Hugging Face** : `huggingface.co`, `api.huggingface.co`, `cdn.huggingface.co`
 - **CDN** : `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`
 
-Pour ajouter un domaine : éditer `gateway/config/allowed-urls.txt`, puis `./scripts/run.sh down && ./scripts/run.sh up`.
+Pour ajouter un domaine : éditer `gateway/config/allowed-urls.txt`, puis `./scripts/run.sh down && ./scripts/run.sh up`. Déjà léger : pas de `--purge-network` à ajouter (le réseau n'est pas concerné), et le rebuild est quasi instantané — seul l'overlay `gateway` (2 lignes de Dockerfile après le `COPY allowed-urls.txt`) est rejoué, le reste (`gateway-base`, `workspace-base`, l'overlay `workspace`) reste en cache de layers.
 
 > ⚠️ **Limite connue** : l'allowlist par domaine réduit le risque d'exfiltration sans l'éliminer (des domaines autorisés comme GitHub ou Hugging Face exposent des surfaces en écriture).
 >

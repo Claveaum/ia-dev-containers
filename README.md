@@ -209,6 +209,7 @@ Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME
 | ⚠️ **Non couvert** | `/workspace` = bind-mount du projet réel, pas un volume vide (au-delà de `ia-dev-containers/` lui-même, protégé ci-dessus) | voir l'avertissement dans [Architecture](#️-architecture--deux-conteneurs-gateway--workspace) |
 | ⚠️ **Vérifié rootless uniquement** | `security-tests.sh` sonde la passerelle du bridge (`10.x.x.1`) sur les ports 22/80 et attend un échec. En Podman **rootful**, cette IP est l'hôte réel : tout service y écoutant sur `0.0.0.0` serait joignable depuis le workspace malgré `--internal` | `run.sh test`, section 3 (« Isolation réseau ») |
 | ⚠️ **Affaibli sous SELinux** (Fedora/RHEL) | `workspace` tourne avec `--security-opt=label=disable` (confinement SELinux désactivé pour ce conteneur) | nécessaire pour que le bind-mount `/workspace` soit accessible sans relabeler les fichiers réels du projet sur disque (l'alternative `:Z` le ferait, effet de bord permanent hors du sandbox) ; no-op sur les hôtes sans SELinux (macOS, Windows, la plupart des distributions Linux hors Fedora/RHEL) |
+| ⚠️ **Non vérifié en session VS Code réelle** | `initializeCommand` (`./scripts/run.sh up`) dans `devcontainer.json` suppose que VS Code l'exécute avec pour cwd le dossier ouvert (`clients/<client>/`) — validé seulement par lecture du JSON généré et de la doc devcontainers, pas par une ouverture VS Code réelle | si l'ouverture échoue à cause de cette ligne, retirez `initializeCommand` de `scripts/devcontainer-skeleton.json.template` et revenez à l'étape manuelle (`cd clients/<client> && ./scripts/run.sh up` avant d'ouvrir VS Code) |
 
 ---
 
@@ -222,7 +223,7 @@ Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME
 - **Hugging Face** : `huggingface.co`, `api.huggingface.co`, `cdn.huggingface.co`
 - **CDN** : `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`
 
-> ⚠️ **Pour ajouter un domaine** : modifiez `clients/mistral-vibe/gateway/config/allowed-urls.txt` puis relancez `./scripts/run.sh down && ./scripts/run.sh up`.
+> ⚠️ **Pour ajouter un domaine** : modifiez `clients/mistral-vibe/gateway/config/allowed-urls.txt` puis relancez `./scripts/run.sh down && ./scripts/run.sh up`. Raccourci déjà assez léger, pas la peine de le durcir davantage : `down` (sans `--purge-network`) ne touche pas au réseau, seul le conteneur `gateway` est recréé, `--purge-network` reste inutile ici ; `build_images()` reconstruit bien les 4 images à chaque fois, mais le cache de layers rend celle qui compte (l'overlay `gateway` du client, 2 lignes de Dockerfile après `allowed-urls.txt`) quasi instantanée — seule la couche `COPY allowed-urls.txt` et ce qui la suit sont rejoués, `gateway-base`/`workspace-base`/l'overlay `workspace` restent en cache. Si un `run.sh shell` tournait dans un autre terminal, il faudra juste le relancer : le workspace est éphémère (`--rm`), `down` ne fait qu'accélérer sa fin.
 
 > ⚠️ **Limite connue** : l'allowlist par domaine *réduit* le risque d'exfiltration, elle ne l'élimine pas. Des domaines autorisés comme `github.com` ou `huggingface.co` exposent des surfaces en écriture (gists, issues, upload de modèles) qui restent un vecteur résiduel.
 
@@ -332,6 +333,25 @@ puis `podman machine stop && podman machine start`.
 
 - **[Mistral Vibe CLI](clients/mistral-vibe/README.md)** — solution complète, testée
 - **[GitHub Copilot CLI](clients/copilot/README.md)** — solution complète, testée (mécanique du sandbox ; session authentifiée non testée)
+
+---
+
+## 🔄 **Mettre à jour une copie déployée**
+
+Le modèle de déploiement de ce projet est la copie (`mon-projet/ia-dev-containers/`), pas un sous-module git ni un package versionné : il n'y a donc pas d'historique de mise à jour automatique. Procédure recommandée — bon sens, pas une commande outillée ni testée par ce projet (voir `CLAUDE.md` : ne rien affirmer de vérifié qui ne l'est pas) :
+
+1. **Identifiez ce qui est spécifique à votre copie**, à ne jamais écraser : `clients/<client>/gateway/config/allowed-urls.txt` (votre allowlist), `clients/<client>/.env` (vos secrets en repli), tout client que vous auriez ajouté vous-même sous `clients/<nouveau-client>/`, et `clients/<client>/.devcontainer/devcontainer.json` (**généré** par `run.sh up`, ne jamais le fusionner à la main — il sera régénéré à l'étape 4).
+2. Tout le reste (`scripts/`, `gateway-base/`, `workspace-base/`, `clients/*/scripts/{lib.sh,run.sh}` et `clients/*/workspace/Dockerfile` pour les clients déjà fournis) est générique et peut être remplacé intégralement par la nouvelle version.
+3. Récupérez la nouvelle version (`git clone`/`git pull` du dépôt source ailleurs, ou archive), puis copiez par-dessus votre copie déployée en excluant les chemins de l'étape 1, par exemple :
+   ```bash
+   rsync -av --delete \
+     --exclude 'clients/*/gateway/config/allowed-urls.txt' \
+     --exclude 'clients/*/.env' \
+     --exclude 'clients/*/.devcontainer/' \
+     /chemin/vers/nouvelle-version/ mon-projet/ia-dev-containers/
+   ```
+   Si votre copie est déjà suivie par le git de `mon-projet` (recommandé), `git diff` avant de committer montre exactement ce qui change — relisez-le, en particulier tout ce qui touche à `gateway-base/`, `workspace-base/` (durcissement) et `scripts/security-tests.sh` (garanties vérifiées).
+4. **Régénérez et validez aux deux niveaux**, pas seulement une relecture du diff : `./scripts/run.sh down --purge-network && ./scripts/run.sh up && ./scripts/run.sh test` (régénère `devcontainer.json`, force la reconstruction des images, revalide réellement les garanties du sandbox).
 
 ---
 
