@@ -41,10 +41,11 @@ docs/{macos,windows}.md
 - `./scripts/run.sh test [--no-build]` — suite de tests de sécurité contre le vrai gateway + `gateway-checks.sh`
 - `./scripts/run.sh exec [-- CMD...]` — second shell dans le workspace déjà lancé par un `run.sh shell` vivant ailleurs
 - `./scripts/run.sh down [--purge-network]` — arrête tout
-- `./scripts/run.sh purge [--volumes]` — supprime images/réseau/conteneurs de ce projet ; `--volumes` supprime aussi les volumes scopés par projet (irréversible)
+- `./scripts/run.sh purge [--volumes [--yes]]` — supprime images/réseau/conteneurs de ce projet ; `--volumes` supprime aussi les volumes scopés par projet (irréversible, confirmation demandée — `--yes` en mode non interactif)
 - `./scripts/run.sh logs [gateway|workspace]` — logs d'un des deux conteneurs
 - `./scripts/run.sh secrets` — statut des secrets (`podman secret` préféré à `.env`)
 - `./scripts/run.sh doctor` — diagnostic plateforme hôte + réseau du projet
+- `./scripts/run.sh --help` / `-h` — résumé des commandes ; sans commande, `shell` est lancé par défaut (avec avertissement)
 
 ## Conventions
 

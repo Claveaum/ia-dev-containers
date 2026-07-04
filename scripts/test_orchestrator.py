@@ -8,6 +8,8 @@
 # Usage : python3 scripts/test_orchestrator.py  (ou -m unittest depuis la racine)
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -353,6 +355,114 @@ class RenderDevcontainerRealClientsTests(unittest.TestCase):
                         json.loads(stripped)
                     except json.JSONDecodeError as exc:
                         self.fail(f"JSON(C) invalide pour {client_dir.name} : {exc}")
+
+
+class MainHelpAndDispatchTests(unittest.TestCase):
+    # Couvre la friction ergonomique corrigée : --help/-h doit être traité
+    # comme une vraie commande (stdout, exit 0), pas retomber dans la même
+    # branche qu'une faute de frappe ; une invocation sans commande doit
+    # prévenir avant de lancer 'shell' par défaut.
+    def _run_main(self, user_args: list[str], own_args: list[str] | None = None) -> tuple[int, str, str]:
+        argv = ["orchestrator.py", *(own_args or []), "--", *user_args]
+        with unittest.mock.patch.object(orch.sys, "argv", argv), \
+             unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as out, \
+             unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            code = orch.main()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_help_flag_prints_to_stdout_and_exits_zero(self) -> None:
+        code, out, err = self._run_main(["--help"])
+        self.assertEqual(code, 0)
+        self.assertIn("Commandes :", out)
+        self.assertEqual(err, "")
+
+    def test_short_help_flag_same_as_long(self) -> None:
+        code, out, _ = self._run_main(["-h"])
+        self.assertEqual(code, 0)
+        self.assertIn("Commandes :", out)
+
+    def test_unknown_command_names_it_and_exits_nonzero(self) -> None:
+        own_args = [
+            "--client-name", "test-client", "--client-root", "/tmp/c",
+            "--repo-root", "/tmp/r", "--project-root", "/tmp/p",
+            "--pkg-volume-target", "/home/devuser/.local",
+            "--devcontainer-display-name", "Test", "--pkg-install-hint", "pip install x",
+        ]
+        code, out, err = self._run_main(["bogus"], own_args)
+        self.assertEqual(code, 1)
+        self.assertIn("'bogus'", err)
+        self.assertEqual(out, "")
+
+    def test_no_command_warns_then_dispatches_to_shell(self) -> None:
+        own_args = [
+            "--client-name", "test-client", "--client-root", "/tmp/c",
+            "--repo-root", "/tmp/r", "--project-root", "/tmp/p",
+            "--pkg-volume-target", "/home/devuser/.local",
+            "--devcontainer-display-name", "Test", "--pkg-install-hint", "pip install x",
+        ]
+        stub = unittest.mock.MagicMock(return_value=0)
+        with unittest.mock.patch.object(orch, "need_podman"), \
+             unittest.mock.patch.dict(orch.COMMANDS, {"shell": stub}):
+            code, out, err = self._run_main([], own_args)
+        self.assertEqual(code, 0)
+        self.assertTrue(stub.called, "la commande par défaut doit rester 'shell'")
+        self.assertIn("shell", err)
+        self.assertIn("par défaut", err)
+
+
+class HandlePurgeVolumesConfirmationTests(unittest.TestCase):
+    # --volumes supprime des données réelles et irréversibles (paquets
+    # installés, cache, état persistant du CLI) : ce candidat ajoute une
+    # confirmation avant l'appel à `podman volume rm`, absente auparavant.
+    def setUp(self) -> None:
+        _clean_env(self)
+        self.config = _make_config()
+
+    def _run_purge(self, rest: list[str], isatty: bool, input_reply: str | None = None):
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(args=cmd, returncode=0)
+
+        patches = [
+            unittest.mock.patch.object(orch, "_podman_rm_f"),
+            unittest.mock.patch.object(orch.subprocess, "run", side_effect=fake_run),
+            unittest.mock.patch.object(orch.sys.stdin, "isatty", return_value=isatty),
+        ]
+        if input_reply is not None:
+            patches.append(unittest.mock.patch("builtins.input", return_value=input_reply))
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            code = orch.handle_purge(self.config, rest)
+        volume_rm_calls = [c for c in calls if c[:3] == ["podman", "volume", "rm"]]
+        return code, volume_rm_calls
+
+    def test_no_volumes_flag_never_touches_volumes(self) -> None:
+        code, volume_rm_calls = self._run_purge([], isatty=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(volume_rm_calls, [])
+
+    def test_volumes_non_interactive_without_yes_is_refused(self) -> None:
+        code, volume_rm_calls = self._run_purge(["--volumes"], isatty=False)
+        self.assertEqual(code, 0)  # le reste de purge (images/réseau) a bien lieu
+        self.assertEqual(volume_rm_calls, [])
+
+    def test_volumes_non_interactive_with_yes_proceeds(self) -> None:
+        code, volume_rm_calls = self._run_purge(["--volumes", "--yes"], isatty=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(volume_rm_calls), 1)
+
+    def test_volumes_interactive_declined(self) -> None:
+        code, volume_rm_calls = self._run_purge(["--volumes"], isatty=True, input_reply="n")
+        self.assertEqual(code, 0)
+        self.assertEqual(volume_rm_calls, [])
+
+    def test_volumes_interactive_accepted(self) -> None:
+        code, volume_rm_calls = self._run_purge(["--volumes"], isatty=True, input_reply="y")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(volume_rm_calls), 1)
 
 
 if __name__ == "__main__":
