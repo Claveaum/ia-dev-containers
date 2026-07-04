@@ -175,6 +175,65 @@ else
     fail "Accès via le gateway à facebook.com réussi (http=$code) — contournement de l'allowlist !"
 fi
 
+# Test 3.5 : résolution DNS externe doit échouer. Sur le réseau --internal du
+# workspace, aardvark-dns écrase resolv.conf par un résolveur qui ne connaît
+# que les noms de conteneurs locaux (NXDOMAIN pour tout le reste — voir
+# gateway-base/config/squid.conf). Vérifié avec netavark 1.17.2 ; c'est une
+# garantie empruntée à l'implémentation Podman, pas verrouillée ailleurs que
+# par ce test. `getent hosts` (glibc) plutôt que nslookup/dig, absents de
+# cette image.
+# Contrôle positif : un test purement négatif ne distingue pas "la propriété
+# tient" de "la sonde ne peut jamais réussir" (ex. resolv.conf absent). Le nom
+# de conteneur "gateway" doit rester résoluble, lui, pour que le négatif
+# ci-dessous soit concluant.
+if getent hosts gateway &>/dev/null; then
+    pass "Résolution DNS locale fonctionnelle (gateway) — le test suivant est concluant"
+else
+    warn "Résolution DNS locale (gateway) en échec — la sonde DNS est inopérante, le test suivant n'est pas concluant"
+fi
+
+if getent hosts example.com &>/dev/null; then
+    fail "La résolution DNS externe (example.com) a réussi — le réseau interne ne devrait pas la permettre !"
+else
+    pass "Résolution DNS externe bloquée (example.com)"
+fi
+
+# Test 3.6 : la passerelle du bridge réseau (10.x.x.1 par convention pour un
+# réseau créé par ensure_network_and_ip(), scripts/orchestrator.py — le
+# conteneur gateway est en .2) ne doit exposer aucun service atteignable
+# depuis le workspace. Pas d'outil `ip`/`hostname -I` dans cette image :
+# l'IP propre du workspace est lue via l'entrée /etc/hosts que Podman ajoute
+# pour son propre hostname.
+# ⚠️ Ne vérifie que le cas rootless : en Podman rootful, cette IP EST l'hôte
+# réel, et tout service y écoutant sur 0.0.0.0 serait joignable malgré
+# --internal (voir README, tableau des résiduels non couverts).
+own_ip=$(getent hosts "$(hostname)" 2>/dev/null | awk '{print $1}' | head -1)
+if [ -z "$own_ip" ]; then
+    warn "IP du workspace introuvable, test de la passerelle du bridge ignoré"
+else
+    bridge_gw="${own_ip%.*}.1"
+    # Contrôle positif : même mécanisme de sonde (exec 3<>/dev/tcp/...), contre
+    # le gateway (.2:3128) qui doit lui être joignable. Sans ça, un `bash` sans
+    # net-redirections (/dev/tcp) échouerait silencieusement à toute connexion
+    # et ferait passer le test négatif ci-dessous pour la mauvaise raison.
+    gateway_probe_ip="${own_ip%.*}.2"
+    if timeout 3 bash -c "exec 3<>/dev/tcp/${gateway_probe_ip}/3128" 2>/dev/null; then
+        exec 3>&- 2>/dev/null || true
+        pass "Sonde TCP fonctionnelle (gateway $gateway_probe_ip:3128 joignable) — le test suivant est concluant"
+    else
+        warn "Sonde TCP inopérante (gateway $gateway_probe_ip:3128 injoignable) — le test suivant n'est pas concluant"
+    fi
+    host_reachable=0
+    for port in 22 80; do
+        if timeout 3 bash -c "exec 3<>/dev/tcp/${bridge_gw}/${port}" 2>/dev/null; then
+            exec 3>&- 2>/dev/null || true
+            fail "La passerelle du bridge ($bridge_gw:$port) est joignable depuis le workspace !"
+            host_reachable=1
+        fi
+    done
+    [ "$host_reachable" -eq 0 ] && pass "Passerelle du bridge ($bridge_gw) injoignable sur les ports 22/80"
+fi
+
 # =============================================================================
 # 4. Spécifique au gestionnaire de paquets du client
 # =============================================================================
