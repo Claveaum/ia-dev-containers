@@ -8,9 +8,9 @@
 
 Ce sandbox exécute Mistral Vibe CLI dans un conteneur **`workspace`** qui n'a **aucune route réseau directe** vers l'extérieur — il ne peut joindre qu'un conteneur **`gateway`** séparé, qui seul possède un accès réseau réel et applique une allowlist de domaines via Squid.
 
-Voir le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour le détail de l'architecture et pourquoi elle est construite ainsi (un seul conteneur ne peut pas garantir les deux propriétés à la fois : accès réseau réel pour le proxy *et* impossibilité de le contourner).
+Voir [docs/architecture.md](../../docs/architecture.md) pour le détail de l'architecture et pourquoi elle est construite ainsi (un seul conteneur ne peut pas garantir les deux propriétés à la fois : accès réseau réel pour le proxy *et* impossibilité de le contourner).
 
-**Ce dossier `ia-dev-containers` est prévu pour être copié à la racine du projet à sandboxer** (`mon-projet/ia-dev-containers/`). `/workspace` dans le conteneur est alors un accès direct à la racine du projet (bind-mount), pas une copie ni un volume vide — le CLI IA travaille sur les vrais fichiers. Voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour les implications.
+**Ce dossier `ia-dev-containers` est prévu pour être copié à la racine du projet à sandboxer** (`mon-projet/ia-dev-containers/`). `/workspace` dans le conteneur est alors un accès direct à la racine du projet (bind-mount), pas une copie ni un volume vide — le CLI IA travaille sur les vrais fichiers. Voir l'avertissement dans [docs/architecture.md](../../docs/architecture.md#workspace-est-un-accès-direct-au-projet-hôte-pas-une-copie-isolée) pour les implications.
 
 ---
 
@@ -117,10 +117,10 @@ chmod 600 .env
 | Abandon définitif des privilèges | `gateway` (`GATEWAY_HARDENED=1`) | `su-exec nobody` après chargement des règles réseau, capacités effectives = 0 |
 | Lecture seule | les deux conteneurs | `--read-only` + tmpfs |
 | `pip install --user` sans sudo | `workspace` | |
-| Auto-protection | `ia-dev-containers/` remonté en lecture seule sur lui-même dans `/workspace` (par défaut) | `run.sh doctor` pour le statut, `run.sh test` pour la vérification — voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) |
-| Cohérence CLI / VS Code | Contrat d'isolation, proxy et `IA_CLIENT` générés depuis une source unique — `run.sh shell`/`test` et le devcontainer VS Code ne peuvent pas diverger | `scripts/orchestrator.py`, voir le [README racine](../../README.md#-mesures-de-sécurité-implémentées) |
-| Isolation entre projets | réseau, conteneurs, images overlay, `~/.local` | scopés par projet, voir [README racine](../../README.md#-isolation-entre-projets) |
-| ⚠️ **Non couvert** | `/workspace` | bind-mount du projet réel, pas un volume vide — voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) |
+| Auto-protection | `ia-dev-containers/` remonté en lecture seule sur lui-même dans `/workspace` (par défaut) | `run.sh doctor` pour le statut, `run.sh test` pour la vérification — voir l'avertissement dans [docs/architecture.md](../../docs/architecture.md#workspace-est-un-accès-direct-au-projet-hôte-pas-une-copie-isolée) |
+| Cohérence CLI / VS Code | Contrat d'isolation, proxy et `IA_CLIENT` générés depuis une source unique — `run.sh shell`/`test` et le devcontainer VS Code ne peuvent pas diverger | `scripts/orchestrator.py`, voir [docs/security.md](../../docs/security.md) |
+| Isolation entre projets | réseau, conteneurs, images overlay, `~/.local` | scopés par projet, voir [docs/architecture.md](../../docs/architecture.md#isolation-entre-projets) |
+| ⚠️ **Non couvert** | `/workspace` | bind-mount du projet réel, pas un volume vide — voir l'avertissement dans [docs/architecture.md](../../docs/architecture.md#workspace-est-un-accès-direct-au-projet-hôte-pas-une-copie-isolée) |
 
 ### **URLs autorisées par défaut**
 
@@ -196,7 +196,7 @@ podman logs <nom-du-conteneur>
 ```
 
 **Puis-je sandboxer plusieurs projets en même temps ?**
-Oui — copiez `ia-dev-containers` à la racine de chaque projet, lancez `run.sh up` dans chacun. Réseau, conteneurs, images overlay et volume de paquets installés (`~/.local`) sont automatiquement scopés par projet (voir [Isolation entre projets](../../README.md#-isolation-entre-projets) dans le README racine) ; les images `*-base` et le cache pip (`~/.cache`) restent partagés.
+Oui — copiez `ia-dev-containers` à la racine de chaque projet, lancez `run.sh up` dans chacun. Réseau, conteneurs, images overlay, volume de paquets installés (`~/.local`) et cache pip (`~/.cache`) sont automatiquement scopés par projet (voir [Isolation entre projets](../../docs/architecture.md#isolation-entre-projets)) ; seules les images `*-base` restent partagées.
 
 ---
 

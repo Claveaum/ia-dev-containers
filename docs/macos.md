@@ -24,7 +24,7 @@ Provider par défaut : `applehv` sur Apple Silicon (macOS ≥ 13) ou `qemu` sino
 
 Une fois la VM démarrée, tout le reste est identique à Linux — y compris la
 copie de `ia-dev-containers` à la racine du projet à sandboxer, requise avant
-tout `run.sh` (voir le [README racine](../README.md#-utilisation-rapide-mistral-vibe-cli)) :
+tout `run.sh` (voir le [README racine](../README.md)) :
 
 ```bash
 # Depuis la racine de VOTRE projet (pas ce dépôt) :
@@ -61,7 +61,7 @@ Cette section décrit ce qu'il reste à vérifier — elle n'a pas pu être exé
    ```
 4. `./scripts/run.sh test` (suite complète) → doit passer.
 5. Répéter 2-4 avec `GATEWAY_HARDENED=1`, plus `podman exec <nom-du-conteneur-gateway> /gateway-checks.sh` (nom exact via `podman ps` ou `run.sh doctor` ; capacités vides, `ip_forward=0`, squid en `nobody` — mêmes assertions déjà prouvées sur Linux).
-6. Répéter toute la séquence pour `clients/copilot`, y compris deux **projets différents simultanément** (comme déjà vérifié sur Linux — voir [Isolation entre projets](../README.md#-isolation-entre-projets)).
+6. Répéter toute la séquence pour `clients/copilot`, y compris deux **projets différents simultanément** (comme déjà vérifié sur Linux — voir [Isolation entre projets](architecture.md#isolation-entre-projets)).
 7. **Point le plus susceptible de diverger de Linux** : vérifier que `$(id -u):$(id -g)` (UID macOS, ex. 501) donne des permissions saines en écriture/lecture dans `/workspace` à travers virtiofs/9p (bind-mount, pas un volume nommé — voir la section ci-dessus), qu'un fichier créé dans le conteneur est bien visible et possédé correctement côté macOS, et que `--security-opt=label=disable` (no-op attendu, macOS n'a pas SELinux) ne cause pas d'effet de bord inattendu.
 8. **"Fait" pour macOS** = tout ce qui précède passe avec la même sémantique pass/fail que Linux (200 / 403 / network unreachable), ou des écarts explicitement documentés qui restent sûrs.
 
