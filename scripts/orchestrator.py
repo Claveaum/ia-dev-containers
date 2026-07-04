@@ -15,13 +15,18 @@
 #   run.sh exec [-- CMD...]         second shell (ou CMD) dans le workspace déjà lancé par
 #                                    un 'run.sh shell' vivant dans un autre terminal
 #   run.sh down [--purge-network]   arrête les conteneurs (et supprime le réseau)
-#   run.sh purge [--volumes]        supprime images overlay + réseau + conteneurs de ce
+#   run.sh purge [--volumes [--yes]] supprime images overlay + réseau + conteneurs de ce
 #                                    projet (tout reconstructible) ; --volumes supprime EN
 #                                    PLUS les volumes scopés par projet (paquets installés,
-#                                    cache, état persistant du CLI) — irréversible
+#                                    cache, état persistant du CLI) — irréversible, demande
+#                                    confirmation (ou --yes en non-interactif)
 #   run.sh logs [gateway|workspace] affiche les logs d'un des deux conteneurs (gateway par défaut)
 #   run.sh secrets                   affiche le statut des secrets attendus (voir lib.sh: SECRETS)
 #   run.sh doctor                    diagnostic plateforme hôte / réseau / projet détecté
+#   run.sh --help | -h               affiche ce résumé des commandes
+#
+# Sans commande, 'shell' est lancé par défaut (avec un avertissement sur
+# stderr) — voir HELP_TEXT ci-dessous pour le texte affiché par --help.
 #
 # --no-build (shell/test) saute build_images() : plus rapide en itération, mais
 # ne redétecte pas un Dockerfile/security-tests.sh/lib.sh modifié depuis le
@@ -386,19 +391,30 @@ def _bring_up_gateway(config: Config, no_build: bool) -> str:
 
 def build_images(config: Config) -> None:
     print("🔧 Construction des images...")
-    subprocess.run(["podman", "build", "-t", config.gateway_base_image, str(config.repo_root / "gateway-base")], check=True)
-    subprocess.run(["podman", "build", "-t", config.workspace_base_image, str(config.repo_root / "workspace-base")], check=True)
-    subprocess.run(["podman", "build", "-t", config.gateway_image, str(config.client_root / "gateway")], check=True)
-    # Contexte = racine du dépôt (pas client_root) pour que le Dockerfile
-    # puisse COPY scripts/security-tests.sh, partagé entre clients.
-    subprocess.run(
-        [
-            "podman", "build", "-t", config.workspace_image,
-            "-f", str(config.client_root / "workspace" / "Dockerfile"),
-            str(config.repo_root),
-        ],
-        check=True,
-    )
+    # Repères [n/4] : les 4 builds s'enchaînent en déversant chacun leur
+    # sortie brute (STEP n/m, logs apk/apt...) ; sans en-tête, impossible de
+    # voir en un coup d'œil où on en est sur un premier `run.sh up` — le
+    # moment où un développeur en a le plus besoin.
+    steps: list[tuple[str, list[str]]] = [
+        ("gateway-base", ["podman", "build", "-t", config.gateway_base_image, str(config.repo_root / "gateway-base")]),
+        ("workspace-base", ["podman", "build", "-t", config.workspace_base_image, str(config.repo_root / "workspace-base")]),
+        (f"gateway-{config.client_name}", ["podman", "build", "-t", config.gateway_image, str(config.client_root / "gateway")]),
+        (
+            # Contexte = racine du dépôt (pas client_root) pour que le
+            # Dockerfile puisse COPY scripts/security-tests.sh, partagé
+            # entre clients.
+            f"workspace-{config.client_name}",
+            [
+                "podman", "build", "-t", config.workspace_image,
+                "-f", str(config.client_root / "workspace" / "Dockerfile"),
+                str(config.repo_root),
+            ],
+        ),
+    ]
+    total = len(steps)
+    for i, (label, cmd) in enumerate(steps, start=1):
+        print(f"  [{i}/{total}] {label}...")
+        subprocess.run(cmd, check=True)
 
 
 def _gateway_state(config: Config) -> tuple[bool, str]:
@@ -564,9 +580,41 @@ def parse_own_args(argv: list[str]) -> Config:
 
 USAGE = (
     "usage: run.sh {up|shell [--no-build] [-- CMD...]|test [--no-build]|"
-    "exec [-- CMD...]|down [--purge-network]|purge [--volumes]|"
-    "logs [gateway|workspace]|secrets|doctor}"
+    "exec [-- CMD...]|down [--purge-network]|purge [--volumes [--yes]]|"
+    "logs [gateway|workspace]|secrets|doctor|--help}"
 )
+
+# Texte complet affiché par `run.sh --help`/`-h` — reprend le tableau des
+# sous-commandes déjà documenté dans le README, pour qu'il soit consultable
+# depuis le terminal sans y retourner.
+HELP_TEXT = """usage: run.sh <commande> [options]
+
+Commandes :
+  up                              build des images + réseau interne du projet + démarrage du gateway
+  shell [--no-build] [-- CMD...]  démarre (ou réutilise) le gateway puis un workspace interactif
+                                   (ou exécute CMD) — commande par défaut si aucune n'est donnée
+  test [--no-build]                démarre le workspace et exécute security-tests.sh + gateway-checks.sh
+  exec [-- CMD...]                 second shell (ou CMD) dans le workspace déjà lancé par un
+                                    'run.sh shell' vivant dans un autre terminal
+  down [--purge-network]           arrête les conteneurs (et supprime le réseau si demandé)
+  purge [--volumes [--yes]]        supprime images/réseau/conteneurs de ce projet (reconstructibles) ;
+                                    --volumes supprime EN PLUS les volumes (paquets installés, cache,
+                                    état persistant du CLI) — irréversible, confirmation demandée
+                                    (ou --yes en mode non interactif)
+  logs [gateway|workspace]         affiche les logs d'un des deux conteneurs (gateway par défaut)
+  secrets                          affiche le statut des secrets attendus
+  doctor                           diagnostic plateforme hôte / réseau / projet détecté
+
+--no-build (shell/test) saute la reconstruction des images : plus rapide en
+itération, mais ne redétecte pas un Dockerfile/security-tests.sh/lib.sh
+modifié depuis le dernier build.
+
+Variables d'environnement utiles (voir le README pour le détail) :
+  GATEWAY_HARDENED=1        active nftables + abandon de privilèges sur le gateway
+  GATEWAY_ADDR_MODE=static  utilise l'IP fixe du gateway au lieu de la résolution DNS
+  IA_PROJECT_NAME=<nom>     force le nom utilisé pour scoper les ressources Podman
+  IA_PROJECT_ROOT=<chemin>  force la racine du projet sandboxé
+  IA_SELF_MOUNT_RW=1        désactive l'auto-protection en lecture seule de ia-dev-containers/"""
 
 
 def handle_up(config: Config, rest: list[str]) -> int:
@@ -628,6 +676,31 @@ def handle_down(config: Config, rest: list[str]) -> int:
 
 
 def handle_purge(config: Config, rest: list[str]) -> int:
+    # --volumes est irréversible (VRAIS paquets installés, cache, et pour
+    # certains clients un état persistant comme un jeton d'auth Copilot) :
+    # une confirmation est requise avant de les supprimer, contrairement au
+    # reste de purge (images/réseau/conteneurs, tous reconstructibles). En
+    # tty, un prompt y suffit ; hors tty (script/CI), --yes doit être fourni
+    # explicitement plutôt que de bloquer sur un input() qui n'arrivera jamais.
+    want_volumes = bool(rest) and rest[0] == "--volumes"
+    volume_names = [m.source for m in mounts(config) if m.type == "volume"] if want_volumes else []
+    if want_volumes:
+        if sys.stdin.isatty():
+            reply = input(
+                f"⚠️  --volumes va supprimer DÉFINITIVEMENT : {', '.join(volume_names)} "
+                "(paquets installés, cache, état persistant du CLI). Continuer ? [y/N] "
+            )
+            want_volumes = reply.strip().lower() in ("y", "yes", "o", "oui")
+            if not want_volumes:
+                print("Volumes conservés (annulé).")
+        elif "--yes" not in rest:
+            print(
+                "⚠️  --volumes en mode non interactif nécessite --yes pour confirmer la "
+                f"suppression irréversible de : {', '.join(volume_names)} — volumes conservés.",
+                file=sys.stderr,
+            )
+            want_volumes = False
+
     _podman_rm_f(config.gateway_container, config.workspace_container)
     subprocess.run(
         ["podman", "network", "rm", config.network_name],
@@ -638,11 +711,7 @@ def handle_purge(config: Config, rest: list[str]) -> int:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     print("✅ Conteneurs, réseau et images de ce projet supprimés (images *-base et volumes conservés).")
-    if rest and rest[0] == "--volumes":
-        # Derrière un flag explicite seulement : ce sont les VRAIS paquets
-        # installés, le cache, et pour certains clients un état persistant
-        # (ex. token d'auth Copilot) — jamais supprimés par défaut.
-        volume_names = [m.source for m in mounts(config) if m.type == "volume"]
+    if want_volumes:
         subprocess.run(
             ["podman", "volume", "rm", "-f", *volume_names],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -688,12 +757,30 @@ def main() -> int:
     boundary = argv.index("--")
     own_args, user_args = argv[:boundary], argv[boundary + 1:]
 
+    # --help/-h avant tout le reste : ni need_podman() (aide utile même sans
+    # Podman installé), ni traité comme une commande inconnue (auparavant,
+    # --help retombait dans la même branche qu'une faute de frappe : USAGE
+    # sur stderr, exit 1).
+    if user_args and user_args[0] in ("-h", "--help", "help"):
+        print(HELP_TEXT)
+        return 0
+
     config = parse_own_args(own_args)
+    if not user_args:
+        # Aucune commande = 'shell' par défaut, qui peut déclencher un build
+        # complet des 4 images : annoncé explicitement plutôt que silencieux,
+        # pour qu'une invocation nue ne surprenne pas par son coût.
+        print(
+            "ℹ️  Aucune commande fournie — lancement de 'shell' par défaut (build des "
+            "images inclus si nécessaire). Voir 'run.sh --help' pour la liste des commandes.",
+            file=sys.stderr,
+        )
     command = user_args[0] if user_args else "shell"
     rest = user_args[1:]
 
     handler = COMMANDS.get(command)
     if handler is None:
+        print(f"❌ Commande inconnue : {command!r}\n", file=sys.stderr)
         print(USAGE, file=sys.stderr)
         return 1
 

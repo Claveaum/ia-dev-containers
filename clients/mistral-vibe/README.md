@@ -42,10 +42,11 @@ Sous-commandes disponibles :
 | `run.sh test [--no-build]` | démarre le workspace et exécute `security-tests.sh` + `gateway-checks.sh` |
 | `run.sh exec [-- CMD...]` | second shell (ou `CMD`) dans le workspace déjà lancé par un `run.sh shell` vivant dans un autre terminal (le workspace est éphémère, `exec` ne peut pas en démarrer un) |
 | `run.sh down [--purge-network]` | arrête les conteneurs (et supprime le réseau si demandé) |
-| `run.sh purge [--volumes]` | supprime images overlay + réseau + conteneurs de ce projet (tout reconstructible) ; `--volumes` supprime EN PLUS les volumes scopés par projet (paquets installés, cache) — irréversible |
+| `run.sh purge [--volumes [--yes]]` | supprime images overlay + réseau + conteneurs de ce projet (tout reconstructible) ; `--volumes` supprime EN PLUS les volumes scopés par projet (paquets installés, cache) — irréversible, demande confirmation (`--yes` pour un usage non interactif/CI) |
 | `run.sh logs [gateway\|workspace]` | affiche les logs d'un des deux conteneurs (`gateway` par défaut) |
 | `run.sh secrets` | affiche le statut des secrets attendus |
 | `run.sh doctor` | diagnostic plateforme hôte + projet/réseau détecté pour cette copie |
+| `run.sh --help` / `-h` | affiche ce tableau depuis le terminal ; sans commande, `shell` est lancé par défaut (avertissement affiché) |
 
 Variables d'environnement :
 
