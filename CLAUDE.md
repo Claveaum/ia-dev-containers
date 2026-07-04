@@ -37,9 +37,12 @@ docs/{macos,windows}.md
 ## Commandes clés (depuis `clients/<nom-du-client>/`)
 
 - `./scripts/run.sh up` — construit les images, crée le réseau interne du projet, démarre le gateway
-- `./scripts/run.sh shell` — shell interactif dans le workspace
-- `./scripts/run.sh test` — suite de tests de sécurité contre le vrai gateway
+- `./scripts/run.sh shell [--no-build] [-- CMD...]` — shell interactif dans le workspace (ou exécute `CMD`)
+- `./scripts/run.sh test [--no-build]` — suite de tests de sécurité contre le vrai gateway + `gateway-checks.sh`
+- `./scripts/run.sh exec [-- CMD...]` — second shell dans le workspace déjà lancé par un `run.sh shell` vivant ailleurs
 - `./scripts/run.sh down [--purge-network]` — arrête tout
+- `./scripts/run.sh purge [--volumes]` — supprime images/réseau/conteneurs de ce projet ; `--volumes` supprime aussi les volumes scopés par projet (irréversible)
+- `./scripts/run.sh logs [gateway|workspace]` — logs d'un des deux conteneurs
 - `./scripts/run.sh secrets` — statut des secrets (`podman secret` préféré à `.env`)
 - `./scripts/run.sh doctor` — diagnostic plateforme hôte + réseau du projet
 

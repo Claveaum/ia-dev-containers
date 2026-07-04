@@ -219,6 +219,18 @@ class MountsTests(unittest.TestCase):
         self.assertTrue(all(m.type != "bind" for m in result))
         self.assertEqual(len(result), 2)  # pkg + cache, pas d'auto-protection
 
+    def test_extra_volume_basename_collision_raises(self) -> None:
+        # _volume_suffix() ne garde que le basename : deux EXTRA_VOLUMES sous
+        # des répertoires différents mais de même nom de fichier final
+        # produiraient le même nom de volume Podman sans cette garde.
+        config = _make_config(
+            repo_root=Path("/tmp/mon-projet"),
+            project_root=Path("/tmp/mon-projet"),
+            extra_volumes=["/home/devuser/.config/state", "/home/devuser/.other/state"],
+        )
+        with self.assertRaises(ValueError):
+            orch.mounts(config)
+
 
 def _client_config_from_lib_sh(lib_sh_path: Path, client_root: Path) -> orch.Config:
     # Sourcé en bash (lib.sh reste bash, y compris pour ce test — voir

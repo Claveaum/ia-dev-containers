@@ -9,20 +9,39 @@
   //     (DEVCONTAINER_DISPLAY_NAME, DEVCONTAINER_EXTENSIONS,
   //     DEVCONTAINER_SETTINGS_JSON, PKG_INSTALL_HINT)
   // Puis relancer `./scripts/run.sh up`, qui régénère le fichier via
-  // render_devcontainer() (scripts/orchestrator.sh).
+  // render_devcontainer() (scripts/orchestrator.py).
   //
-  // ⚠️ PRÉREQUIS OBLIGATOIRE : ce devcontainer ne construit/lance que le
-  // conteneur "workspace". Le conteneur "gateway" (proxy Squid, filtrage
-  // réseau) et le réseau interne dédié à ce projet doivent déjà exister
-  // AVANT d'ouvrir ce dossier dans VS Code :
+  // ⚠️ PRÉREQUIS pour la toute première ouverture : ce fichier lui-même est
+  // généré par `run.sh up` (render_devcontainer()) — s'il n'existe pas
+  // encore, VS Code n'a rien à détecter, donc rien à automatiser. Un premier
+  // `cd clients/__CLIENT_NAME__ && ./scripts/run.sh up` manuel reste
+  // nécessaire une fois :
   //
   //   cd clients/__CLIENT_NAME__ && ./scripts/run.sh up
   //
-  // Si le réseau __NETWORK_NAME__ n'existe pas encore, la création
-  // du conteneur échouera (runArgs y fait référence ci-dessous).
+  // Une fois ce fichier généré, les réouvertures suivantes (y compris après
+  // un `run.sh down`) sont censées relancer automatiquement le gateway et le
+  // réseau via `initializeCommand` ci-dessous, sans repasser par cette étape
+  // manuelle.
+  //
+  // ⚠️ NON VÉRIFIÉ EN SESSION VS CODE RÉELLE : `initializeCommand` ci-dessous
+  // suppose que VS Code l'exécute avec pour cwd le dossier ouvert
+  // (clients/__CLIENT_NAME__/, qui contient ce .devcontainer/), d'où le
+  // chemin relatif "./scripts/run.sh up". Si cette hypothèse sur le contrat
+  // devcontainer.json est fausse, la commande échoue et VS Code peut refuser
+  // d'ouvrir — un vrai risque de régression, pas juste "aucune amélioration".
+  // Si l'ouverture échoue à cause de cette ligne, retirez `initializeCommand`
+  // et revenez à l'étape manuelle documentée ci-dessus.
   "name": "__DEVCONTAINER_DISPLAY_NAME__ - Workspace (sandbox à deux conteneurs)",
   "containerUser": "devuser",
   "remoteUser": "devuser",
+
+  // Exécuté par VS Code sur l'hôte, avant la création du conteneur, à chaque
+  // ouverture — cwd supposé être ce dossier (clients/__CLIENT_NAME__/), d'où
+  // le chemin relatif (voir l'avertissement "NON VÉRIFIÉ" ci-dessus).
+  // Idempotent (build_images()/ensure_network_and_ip()/start_gateway()
+  // réutilisent l'existant s'il est déjà là).
+  "initializeCommand": "./scripts/run.sh up",
 
   "build": {
     // Chemins relatifs à ce fichier devcontainer.json (spec devcontainers).

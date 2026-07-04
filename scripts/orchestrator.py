@@ -7,12 +7,25 @@
 # jamais en variable globale/d'environnement implicite.
 #
 # Usage (identique pour tous les clients, via run.sh) :
-#   run.sh up                     construit les images, crée le réseau, lance le gateway
-#   run.sh shell [-- CMD...]      lance (ou réutilise) le gateway puis un workspace interactif
-#   run.sh test                   lance le workspace et exécute security-tests.sh
-#   run.sh down [--purge-network] arrête les conteneurs (et supprime le réseau)
-#   run.sh secrets                affiche le statut des secrets attendus (voir lib.sh: SECRETS)
-#   run.sh doctor                 diagnostic plateforme hôte / réseau / projet détecté
+#   run.sh up                        construit les images, crée le réseau, lance le gateway
+#   run.sh shell [--no-build] [-- CMD...]
+#                                    lance (ou réutilise) le gateway puis un workspace interactif
+#   run.sh test [--no-build]        lance le workspace et exécute security-tests.sh
+#                                    + gateway-checks.sh
+#   run.sh exec [-- CMD...]         second shell (ou CMD) dans le workspace déjà lancé par
+#                                    un 'run.sh shell' vivant dans un autre terminal
+#   run.sh down [--purge-network]   arrête les conteneurs (et supprime le réseau)
+#   run.sh purge [--volumes]        supprime images overlay + réseau + conteneurs de ce
+#                                    projet (tout reconstructible) ; --volumes supprime EN
+#                                    PLUS les volumes scopés par projet (paquets installés,
+#                                    cache, état persistant du CLI) — irréversible
+#   run.sh logs [gateway|workspace] affiche les logs d'un des deux conteneurs (gateway par défaut)
+#   run.sh secrets                   affiche le statut des secrets attendus (voir lib.sh: SECRETS)
+#   run.sh doctor                    diagnostic plateforme hôte / réseau / projet détecté
+#
+# --no-build (shell/test) saute build_images() : plus rapide en itération, mais
+# ne redétecte pas un Dockerfile/security-tests.sh/lib.sh modifié depuis le
+# dernier build — à ne pas utiliser après une modification de ces fichiers.
 #
 # Variables d'environnement (réglages utilisateur documentés, lus
 # directement ici — pas des données lib.sh, donc pas de raison de les faire
@@ -137,6 +150,16 @@ def mounts(config: Config) -> list[Mount]:
         name = f"{config.client_name}-{_volume_suffix(target)}-{config.project_name}"
         result.append(Mount(name, target, "volume"))
     result.append(Mount(config.cache_volume, "/home/devuser/.cache", "volume"))
+
+    # _volume_suffix() ne garde que le basename : deux cibles de nom de fichier
+    # identique sous des répertoires différents (ex. deux EXTRA_VOLUMES, ou un
+    # EXTRA_VOLUMES qui rejoue par erreur PKG_VOLUME_TARGET) produiraient le
+    # même nom de volume Podman et se marcheraient dessus silencieusement.
+    volume_names = [m.source for m in result if m.type == "volume"]
+    if len(volume_names) != len(set(volume_names)):
+        dupes = sorted({n for n in volume_names if volume_names.count(n) > 1})
+        raise ValueError(f"Collision de noms de volumes dans mounts() : {dupes}")
+
     return result
 
 
@@ -447,8 +470,18 @@ def start_workspace(config: Config, gateway_ip: str, extra_args: list[str]) -> i
 
     cli_mount_args = [arg for m in mounts(config) for arg in _mount_cli_args(m)]
 
+    # -i reste inconditionnel (stdin doit rester ouvert pour piper une commande
+    # non interactive) ; -t allouerait un pseudo-TTY même quand stdout n'en est
+    # pas un (CI, `run.sh shell -- CMD | other`), ce que podman signale par un
+    # warning et peut perturber la sortie capturée.
+    # ⚠️ Branche isatty()=True (usage interactif normal, -t alloué) non
+    # exercée par les validations de ce projet : tout `run.sh` y est lancé
+    # au travers d'un pipe (stdin non-tty), seule la branche non-interactive
+    # a été observée réellement. Comportement inchangé par rapport à avant
+    # (toujours -it) dans ce cas précis, donc risque de régression faible.
+    tty_args = ["-t"] if sys.stdin.isatty() else []
     cmd = [
-        "podman", "run", "--rm", "-it", "--name", config.workspace_container,
+        "podman", "run", "--rm", "-i", *tty_args, "--name", config.workspace_container,
         "--user", f"{os.getuid()}:{os.getgid()}",
         *WORKSPACE_SECURITY_ARGS,
         f"--network={config.network_name}",
@@ -519,7 +552,11 @@ def parse_own_args(argv: list[str]) -> Config:
     )
 
 
-USAGE = "usage: run.sh {up|shell [-- CMD...]|test|down [--purge-network]|secrets|doctor}"
+USAGE = (
+    "usage: run.sh {up|shell [--no-build] [-- CMD...]|test [--no-build]|"
+    "exec [-- CMD...]|down [--purge-network]|purge [--volumes]|"
+    "logs [gateway|workspace]|secrets|doctor}"
+)
 
 
 def main() -> int:
@@ -544,7 +581,11 @@ def main() -> int:
 
     if command == "shell":
         need_podman()
-        build_images(config)
+        no_build = bool(rest) and rest[0] == "--no-build"
+        if no_build:
+            rest = rest[1:]
+        else:
+            build_images(config)
         _subnet, gateway_ip = ensure_network_and_ip(config)
         start_gateway(config, gateway_ip)
         if rest and rest[0] == "--":
@@ -553,10 +594,40 @@ def main() -> int:
 
     if command == "test":
         need_podman()
-        build_images(config)
+        no_build = bool(rest) and rest[0] == "--no-build"
+        if not no_build:
+            build_images(config)
         _subnet, gateway_ip = ensure_network_and_ip(config)
         start_gateway(config, gateway_ip)
+        # flush() : stdout est bufferisé par bloc (pas ligne par ligne) dès
+        # que la sortie est redirigée/pipée (CI, `| tee`) — sans ça, ce print()
+        # se retrouverait affiché après la sortie du subprocess qui suit, qui
+        # écrit directement sur le fd hérité sans passer par ce buffer.
+        print("🔎==== Vérifications côté gateway ====🔎", flush=True)
+        subprocess.run(["podman", "exec", config.gateway_container, "/gateway-checks.sh"])
+        print("", flush=True)
         return start_workspace(config, gateway_ip, ["/security-tests.sh"])
+
+    if command == "exec":
+        need_podman()
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        cmd = rest if rest else ["bash"]
+        running = subprocess.run(
+            ["podman", "inspect", "-f", "{{.State.Running}}", config.workspace_container],
+            capture_output=True, text=True,
+        )
+        if running.returncode != 0 or running.stdout.strip() != "true":
+            print(
+                f"❌ Aucun workspace en cours ({config.workspace_container}). "
+                "Le workspace est éphémère (podman run --rm) : lancez d'abord "
+                "'run.sh shell' dans un autre terminal, puis 'run.sh exec' pour "
+                "un second shell dessus.",
+                file=sys.stderr,
+            )
+            return 1
+        tty_args = ["-t"] if sys.stdin.isatty() else []
+        return subprocess.run(["podman", "exec", "-i", *tty_args, config.workspace_container, *cmd]).returncode
 
     if command == "down":
         subprocess.run(
@@ -570,6 +641,39 @@ def main() -> int:
             )
         print("✅ Conteneurs arrêtés.")
         return 0
+
+    if command == "purge":
+        need_podman()
+        subprocess.run(
+            ["podman", "rm", "-f", config.gateway_container, config.workspace_container],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["podman", "network", "rm", config.network_name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ["podman", "rmi", "-f", config.gateway_image, config.workspace_image],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        print("✅ Conteneurs, réseau et images de ce projet supprimés (images *-base et volumes conservés).")
+        if rest and rest[0] == "--volumes":
+            # Derrière un flag explicite seulement : ce sont les VRAIS paquets
+            # installés, le cache, et pour certains clients un état persistant
+            # (ex. token d'auth Copilot) — jamais supprimés par défaut.
+            volume_names = [m.source for m in mounts(config) if m.type == "volume"]
+            subprocess.run(
+                ["podman", "volume", "rm", "-f", *volume_names],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            print(f"⚠️  Volumes aussi supprimés (irréversible) : {', '.join(volume_names)}")
+        return 0
+
+    if command == "logs":
+        need_podman()
+        target = rest[0] if rest else "gateway"
+        container = config.workspace_container if target == "workspace" else config.gateway_container
+        return subprocess.run(["podman", "logs", container]).returncode
 
     if command == "secrets":
         need_podman()
