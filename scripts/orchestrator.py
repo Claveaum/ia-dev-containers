@@ -50,6 +50,7 @@ import subprocess
 import sys
 import zlib
 from pathlib import Path
+from typing import Callable
 
 WORKSPACE_SECURITY_ARGS = [
     "--userns=keep-id",
@@ -360,6 +361,25 @@ def need_podman() -> None:
     preflight_platform_check()
 
 
+def parse_no_build(rest: list[str]) -> tuple[bool, list[str]]:
+    no_build = bool(rest) and rest[0] == "--no-build"
+    return no_build, (rest[1:] if no_build else rest)
+
+
+def strip_leading_dashdash(rest: list[str]) -> list[str]:
+    if rest and rest[0] == "--":
+        return rest[1:]
+    return rest
+
+
+def _bring_up_gateway(config: Config, no_build: bool) -> str:
+    if not no_build:
+        build_images(config)
+    _subnet, gateway_ip = ensure_network_and_ip(config)
+    start_gateway(config, gateway_ip)
+    return gateway_ip
+
+
 def build_images(config: Config) -> None:
     print("🔧 Construction des images...")
     subprocess.run(["podman", "build", "-t", config.gateway_base_image, str(config.repo_root / "gateway-base")], check=True)
@@ -559,6 +579,126 @@ USAGE = (
 )
 
 
+def handle_up(config: Config, rest: list[str]) -> int:
+    gateway_ip = _bring_up_gateway(config, no_build=False)
+    render_devcontainer(config, gateway_ip)
+    return 0
+
+
+def handle_shell(config: Config, rest: list[str]) -> int:
+    no_build, rest = parse_no_build(rest)
+    gateway_ip = _bring_up_gateway(config, no_build)
+    rest = strip_leading_dashdash(rest)
+    return start_workspace(config, gateway_ip, rest)
+
+
+def handle_test(config: Config, rest: list[str]) -> int:
+    no_build, rest = parse_no_build(rest)
+    gateway_ip = _bring_up_gateway(config, no_build)
+    # flush() : stdout est bufferisé par bloc (pas ligne par ligne) dès
+    # que la sortie est redirigée/pipée (CI, `| tee`) — sans ça, ce print()
+    # se retrouverait affiché après la sortie du subprocess qui suit, qui
+    # écrit directement sur le fd hérité sans passer par ce buffer.
+    print("🔎==== Vérifications côté gateway ====🔎", flush=True)
+    gateway_rc = subprocess.run(["podman", "exec", config.gateway_container, "/gateway-checks.sh"]).returncode
+    print("", flush=True)
+    workspace_rc = start_workspace(config, gateway_ip, ["/security-tests.sh"])
+    if gateway_rc != 0:
+        print("❌ Vérifications côté gateway en échec.", file=sys.stderr)
+        return gateway_rc
+    return workspace_rc
+
+
+def handle_exec(config: Config, rest: list[str]) -> int:
+    rest = strip_leading_dashdash(rest)
+    cmd = rest if rest else ["bash"]
+    running = subprocess.run(
+        ["podman", "inspect", "-f", "{{.State.Running}}", config.workspace_container],
+        capture_output=True, text=True,
+    )
+    if running.returncode != 0 or running.stdout.strip() != "true":
+        print(
+            f"❌ Aucun workspace en cours ({config.workspace_container}). "
+            "Le workspace est éphémère (podman run --rm) : lancez d'abord "
+            "'run.sh shell' dans un autre terminal, puis 'run.sh exec' pour "
+            "un second shell dessus.",
+            file=sys.stderr,
+        )
+        return 1
+    tty_args = ["-t"] if sys.stdin.isatty() else []
+    return subprocess.run(["podman", "exec", "-i", *tty_args, config.workspace_container, *cmd]).returncode
+
+
+def handle_down(config: Config, rest: list[str]) -> int:
+    subprocess.run(
+        ["podman", "rm", "-f", config.gateway_container, config.workspace_container],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if rest and rest[0] == "--purge-network":
+        subprocess.run(
+            ["podman", "network", "rm", config.network_name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    print("✅ Conteneurs arrêtés.")
+    return 0
+
+
+def handle_purge(config: Config, rest: list[str]) -> int:
+    subprocess.run(
+        ["podman", "rm", "-f", config.gateway_container, config.workspace_container],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["podman", "network", "rm", config.network_name],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["podman", "rmi", "-f", config.gateway_image, config.workspace_image],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    print("✅ Conteneurs, réseau et images de ce projet supprimés (images *-base et volumes conservés).")
+    if rest and rest[0] == "--volumes":
+        # Derrière un flag explicite seulement : ce sont les VRAIS paquets
+        # installés, le cache, et pour certains clients un état persistant
+        # (ex. token d'auth Copilot) — jamais supprimés par défaut.
+        volume_names = [m.source for m in mounts(config) if m.type == "volume"]
+        subprocess.run(
+            ["podman", "volume", "rm", "-f", *volume_names],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        print(f"⚠️  Volumes aussi supprimés (irréversible) : {', '.join(volume_names)}")
+    return 0
+
+
+def handle_logs(config: Config, rest: list[str]) -> int:
+    target = rest[0] if rest else "gateway"
+    container = config.workspace_container if target == "workspace" else config.gateway_container
+    return subprocess.run(["podman", "logs", container]).returncode
+
+
+def handle_secrets(config: Config, rest: list[str]) -> int:
+    list_secrets(config)
+    return 0
+
+
+def handle_doctor(config: Config, rest: list[str]) -> int:
+    cmd_doctor(config)
+    return 0
+
+
+COMMANDS: dict[str, Callable[[Config, list[str]], int]] = {
+    "up": handle_up,
+    "shell": handle_shell,
+    "test": handle_test,
+    "exec": handle_exec,
+    "down": handle_down,
+    "purge": handle_purge,
+    "logs": handle_logs,
+    "secrets": handle_secrets,
+    "doctor": handle_doctor,
+}
+
+
 def main() -> int:
     argv = sys.argv[1:]
     if "--" not in argv:
@@ -571,122 +711,13 @@ def main() -> int:
     command = user_args[0] if user_args else "shell"
     rest = user_args[1:]
 
-    if command == "up":
-        need_podman()
-        build_images(config)
-        _subnet, gateway_ip = ensure_network_and_ip(config)
-        start_gateway(config, gateway_ip)
-        render_devcontainer(config, gateway_ip)
-        return 0
+    handler = COMMANDS.get(command)
+    if handler is None:
+        print(USAGE, file=sys.stderr)
+        return 1
 
-    if command == "shell":
-        need_podman()
-        no_build = bool(rest) and rest[0] == "--no-build"
-        if no_build:
-            rest = rest[1:]
-        else:
-            build_images(config)
-        _subnet, gateway_ip = ensure_network_and_ip(config)
-        start_gateway(config, gateway_ip)
-        if rest and rest[0] == "--":
-            rest = rest[1:]
-        return start_workspace(config, gateway_ip, rest)
-
-    if command == "test":
-        need_podman()
-        no_build = bool(rest) and rest[0] == "--no-build"
-        if not no_build:
-            build_images(config)
-        _subnet, gateway_ip = ensure_network_and_ip(config)
-        start_gateway(config, gateway_ip)
-        # flush() : stdout est bufferisé par bloc (pas ligne par ligne) dès
-        # que la sortie est redirigée/pipée (CI, `| tee`) — sans ça, ce print()
-        # se retrouverait affiché après la sortie du subprocess qui suit, qui
-        # écrit directement sur le fd hérité sans passer par ce buffer.
-        print("🔎==== Vérifications côté gateway ====🔎", flush=True)
-        subprocess.run(["podman", "exec", config.gateway_container, "/gateway-checks.sh"])
-        print("", flush=True)
-        return start_workspace(config, gateway_ip, ["/security-tests.sh"])
-
-    if command == "exec":
-        need_podman()
-        if rest and rest[0] == "--":
-            rest = rest[1:]
-        cmd = rest if rest else ["bash"]
-        running = subprocess.run(
-            ["podman", "inspect", "-f", "{{.State.Running}}", config.workspace_container],
-            capture_output=True, text=True,
-        )
-        if running.returncode != 0 or running.stdout.strip() != "true":
-            print(
-                f"❌ Aucun workspace en cours ({config.workspace_container}). "
-                "Le workspace est éphémère (podman run --rm) : lancez d'abord "
-                "'run.sh shell' dans un autre terminal, puis 'run.sh exec' pour "
-                "un second shell dessus.",
-                file=sys.stderr,
-            )
-            return 1
-        tty_args = ["-t"] if sys.stdin.isatty() else []
-        return subprocess.run(["podman", "exec", "-i", *tty_args, config.workspace_container, *cmd]).returncode
-
-    if command == "down":
-        subprocess.run(
-            ["podman", "rm", "-f", config.gateway_container, config.workspace_container],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        if rest and rest[0] == "--purge-network":
-            subprocess.run(
-                ["podman", "network", "rm", config.network_name],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        print("✅ Conteneurs arrêtés.")
-        return 0
-
-    if command == "purge":
-        need_podman()
-        subprocess.run(
-            ["podman", "rm", "-f", config.gateway_container, config.workspace_container],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        subprocess.run(
-            ["podman", "network", "rm", config.network_name],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        subprocess.run(
-            ["podman", "rmi", "-f", config.gateway_image, config.workspace_image],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        print("✅ Conteneurs, réseau et images de ce projet supprimés (images *-base et volumes conservés).")
-        if rest and rest[0] == "--volumes":
-            # Derrière un flag explicite seulement : ce sont les VRAIS paquets
-            # installés, le cache, et pour certains clients un état persistant
-            # (ex. token d'auth Copilot) — jamais supprimés par défaut.
-            volume_names = [m.source for m in mounts(config) if m.type == "volume"]
-            subprocess.run(
-                ["podman", "volume", "rm", "-f", *volume_names],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            print(f"⚠️  Volumes aussi supprimés (irréversible) : {', '.join(volume_names)}")
-        return 0
-
-    if command == "logs":
-        need_podman()
-        target = rest[0] if rest else "gateway"
-        container = config.workspace_container if target == "workspace" else config.gateway_container
-        return subprocess.run(["podman", "logs", container]).returncode
-
-    if command == "secrets":
-        need_podman()
-        list_secrets(config)
-        return 0
-
-    if command == "doctor":
-        need_podman()
-        cmd_doctor(config)
-        return 0
-
-    print(USAGE, file=sys.stderr)
-    return 1
+    need_podman()
+    return handler(config, rest)
 
 
 if __name__ == "__main__":
