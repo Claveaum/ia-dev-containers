@@ -191,23 +191,27 @@ def _subnet_offset_seed(config: Config) -> int:
     return zlib.crc32(data)
 
 
-def _podman_network_exists(name: str) -> bool:
+def _podman_ok(*args: str) -> bool:
     return subprocess.run(
-        ["podman", "network", "exists", name],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ["podman", *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     ).returncode == 0
 
 
+def _podman_stdout(*args: str) -> str:
+    result = subprocess.run(["podman", *args], capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _podman_rm_f(*names: str) -> None:
+    subprocess.run(["podman", "rm", "-f", *names], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def _podman_network_subnet(name: str) -> str:
-    result = subprocess.run(
-        ["podman", "network", "inspect", name, "--format", "{{(index .Subnets 0).Subnet}}"],
-        capture_output=True, text=True, check=True,
-    )
-    return result.stdout.strip()
+    return _podman_stdout("network", "inspect", name, "--format", "{{(index .Subnets 0).Subnet}}")
 
 
 def ensure_network_and_ip(config: Config) -> tuple[str, str]:
-    if _podman_network_exists(config.network_name):
+    if _podman_ok("network", "exists", config.network_name):
         subnet = _podman_network_subnet(config.network_name)
     else:
         offset = (_subnet_offset_seed(config) % 240) + 10
@@ -328,9 +332,13 @@ def preflight_platform_check() -> None:
         print(f"⚠️  Plateforme hôte non reconnue ({system}) — poursuite sans vérification podman machine.", file=sys.stderr)
         return
 
-    result = subprocess.run(["podman", "machine", "list", "-q"], capture_output=True, text=True)
-    machine_names = result.stdout.strip()
-    if not machine_names:
+    machine_json = _podman_stdout("machine", "list", "--format", "json")
+    try:
+        machines = json.loads(machine_json) if machine_json else []
+    except (json.JSONDecodeError, TypeError):
+        machines = None  # JSON illisible : on ne peut pas savoir combien de VMs existent
+
+    if machines == []:
         print(
             "❌ Aucune VM \"podman machine\" détectée sur cette plateforme (macOS/Windows).\n"
             "   Podman a besoin d'une machine virtuelle Linux pour fonctionner ici. Lancez :\n"
@@ -341,17 +349,13 @@ def preflight_platform_check() -> None:
         )
         sys.exit(1)
 
-    result = subprocess.run(["podman", "machine", "list", "--format", "json"], capture_output=True, text=True)
-    machine_json = result.stdout.strip()
-    if machine_json:
-        try:
-            machines = json.loads(machine_json)
-            running = any(m.get("Running") for m in machines)
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            running = bool(re.search(r'"Running"\s*:\s*true', machine_json))
-        if not running:
-            print("⚠️  Aucune VM podman machine ne semble démarrée. Si la suite échoue :", file=sys.stderr)
-            print("     podman machine start", file=sys.stderr)
+    if machines is not None:
+        running = any(m.get("Running") for m in machines)
+    else:
+        running = bool(re.search(r'"Running"\s*:\s*true', machine_json))
+    if not running:
+        print("⚠️  Aucune VM podman machine ne semble démarrée. Si la suite échoue :", file=sys.stderr)
+        print("     podman machine start", file=sys.stderr)
 
 
 def need_podman() -> None:
@@ -397,31 +401,23 @@ def build_images(config: Config) -> None:
     )
 
 
-def gateway_running(config: Config) -> bool:
-    exists = subprocess.run(
-        ["podman", "container", "exists", config.gateway_container],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ).returncode == 0
-    if not exists:
-        return False
-    result = subprocess.run(
-        ["podman", "inspect", "-f", "{{.State.Running}}", config.gateway_container],
-        capture_output=True, text=True,
-    )
-    return result.stdout.strip() == "true"
+def _gateway_state(config: Config) -> tuple[bool, str]:
+    # Un seul appel `podman inspect` (au lieu de trois : container exists,
+    # State.Running, HostConfig.CapAdd) — un conteneur inexistant fait
+    # simplement échouer l'appel (returncode != 0), traité comme "arrêté".
+    state = _podman_stdout("inspect", "-f", "{{.State.Running}}|{{.HostConfig.CapAdd}}", config.gateway_container)
+    running, _, cap_add = state.partition("|")
+    return running == "true", cap_add
 
 
 def start_gateway(config: Config, gateway_ip: str) -> None:
-    if gateway_running(config):
-        result = subprocess.run(
-            ["podman", "inspect", "-f", "{{.HostConfig.CapAdd}}", config.gateway_container],
-            capture_output=True, text=True,
-        )
-        running_mode = "durci" if "NET_ADMIN" in result.stdout else "simple"
+    running, cap_add = _gateway_state(config)
+    if running:
+        running_mode = "durci" if "NET_ADMIN" in cap_add else "simple"
         print(f"ℹ️  Gateway déjà démarré (mode {running_mode}).")
         return
 
-    subprocess.run(["podman", "rm", "-f", config.gateway_container], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _podman_rm_f(config.gateway_container)
 
     cap_args = ["--cap-drop=ALL"]
     user_args: list[str] = []
@@ -449,18 +445,16 @@ def start_gateway(config: Config, gateway_ip: str) -> None:
     print(f"✅ Gateway démarré ({config.gateway_container})")
 
 
-def _podman_secret_exists(name: str) -> bool:
-    return subprocess.run(
-        ["podman", "secret", "exists", name],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ).returncode == 0
+def _parse_secret_entry(entry: str) -> tuple[str, str]:
+    secret_name, _, var_name = entry.partition(":")
+    return secret_name, var_name
 
 
 def secret_args(config: Config) -> list[str]:
     args: list[str] = []
     for entry in config.secrets:
-        secret_name, _, var_name = entry.partition(":")
-        if _podman_secret_exists(secret_name):
+        secret_name, var_name = _parse_secret_entry(entry)
+        if _podman_ok("secret", "exists", secret_name):
             args += ["--secret", f"{secret_name},type=env,target={var_name}"]
     return args
 
@@ -474,8 +468,8 @@ def list_secrets(config: Config) -> None:
             if "=" in line:
                 env_keys.add(line.split("=", 1)[0])
     for entry in config.secrets:
-        secret_name, _, var_name = entry.partition(":")
-        if _podman_secret_exists(secret_name):
+        secret_name, var_name = _parse_secret_entry(entry)
+        if _podman_ok("secret", "exists", secret_name):
             print(f"  {var_name} : ✅ défini (podman secret '{secret_name}')")
         elif var_name in env_keys:
             print(f"  {var_name} : ✅ défini (.env, repli — la valeur apparaît en clair dans 'podman inspect')")
@@ -519,11 +513,7 @@ def start_workspace(config: Config, gateway_ip: str, extra_args: list[str]) -> i
 
 def cmd_doctor(config: Config) -> None:
     print(f"Système hôte : {platform.system()} ({platform.machine()})")
-    version_result = subprocess.run(
-        ["podman", "version", "--format", "{{.Client.Version}}"],
-        capture_output=True, text=True,
-    )
-    version = version_result.stdout.strip() if version_result.returncode == 0 else "inconnu"
+    version = _podman_stdout("version", "--format", "{{.Client.Version}}")
     print(f"podman        : {version or 'inconnu'}")
     if platform.system() != "Linux":
         print("")
@@ -534,7 +524,7 @@ def cmd_doctor(config: Config) -> None:
     print(f"Nom sandbox     : {config.project_name}")
     print(f"Réseau          : {config.network_name}")
     print(f"Auto-protection : {self_protect_status(config)}")
-    if _podman_network_exists(config.network_name):
+    if _podman_ok("network", "exists", config.network_name):
         print(f"  subnet (existant) : {_podman_network_subnet(config.network_name)}")
     else:
         print("  pas encore créé — sera un /24 dans 10.89.0.0/16 (choisi par 'run.sh up')")
@@ -612,11 +602,8 @@ def handle_test(config: Config, rest: list[str]) -> int:
 def handle_exec(config: Config, rest: list[str]) -> int:
     rest = strip_leading_dashdash(rest)
     cmd = rest if rest else ["bash"]
-    running = subprocess.run(
-        ["podman", "inspect", "-f", "{{.State.Running}}", config.workspace_container],
-        capture_output=True, text=True,
-    )
-    if running.returncode != 0 or running.stdout.strip() != "true":
+    running = _podman_stdout("inspect", "-f", "{{.State.Running}}", config.workspace_container)
+    if running != "true":
         print(
             f"❌ Aucun workspace en cours ({config.workspace_container}). "
             "Le workspace est éphémère (podman run --rm) : lancez d'abord "
@@ -630,10 +617,7 @@ def handle_exec(config: Config, rest: list[str]) -> int:
 
 
 def handle_down(config: Config, rest: list[str]) -> int:
-    subprocess.run(
-        ["podman", "rm", "-f", config.gateway_container, config.workspace_container],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    _podman_rm_f(config.gateway_container, config.workspace_container)
     if rest and rest[0] == "--purge-network":
         subprocess.run(
             ["podman", "network", "rm", config.network_name],
@@ -644,10 +628,7 @@ def handle_down(config: Config, rest: list[str]) -> int:
 
 
 def handle_purge(config: Config, rest: list[str]) -> int:
-    subprocess.run(
-        ["podman", "rm", "-f", config.gateway_container, config.workspace_container],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    _podman_rm_f(config.gateway_container, config.workspace_container)
     subprocess.run(
         ["podman", "network", "rm", config.network_name],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
