@@ -3,7 +3,7 @@ set -uo pipefail
 
 # =============================================================================
 # IA Dev Container - Tests de sécurité (à exécuter DANS le workspace). Point
-# d'entrée fixe attendu par start_workspace() (scripts/orchestrator.sh) :
+# d'entrée fixe attendu par start_workspace() (scripts/orchestrator.py) :
 # COPY'd en /security-tests.sh par le Dockerfile de chaque client, à côté de
 # /lib.sh (l'adaptateur du client, sourcé ci-dessous en premier). Partagé
 # entre tous les clients — aucun contenu spécifique à un client ici, tout ce

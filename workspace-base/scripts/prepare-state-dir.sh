@@ -9,7 +9,7 @@
 # — ne pas reconstituer ce mkdir/chown/chmod à la main ailleurs.
 #
 # Le chmod 2775 (et pas 755, ce que ferait un simple chown -R devuser:devuser)
-# est le point non-obvious : `--userns=keep-id` (scripts/common.sh,
+# est le point non-obvious : `--userns=keep-id` (scripts/orchestrator.py,
 # WORKSPACE_SECURITY_ARGS) ajoute automatiquement l'UID hôte au groupe
 # ${USERNAME} en membre secondaire, mais un mode 755 ne donne au groupe que
 # lecture/exécution. Sur un host dont l'UID correspond à USER_UID (Linux,

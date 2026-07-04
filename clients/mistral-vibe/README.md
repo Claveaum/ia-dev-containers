@@ -19,6 +19,7 @@ Voir le [README racine](../../README.md#️-architecture--deux-conteneurs-gatewa
 ### **Prérequis**
 
 - [Podman](https://podman.io/) installé (testé avec Podman 5.8.3, rootless, backend réseau `netavark`)
+- `python3` installé (requis par `scripts/orchestrator.py`, voir [README racine](../../README.md#️-plateformes-hôte))
 - macOS/Windows : voir [docs/macos.md](../../docs/macos.md) / [docs/windows.md](../../docs/windows.md) avant de continuer — expérimental, non vérifié sur matériel réel.
 
 ### **Démarrage**
@@ -114,7 +115,7 @@ chmod 600 .env
 | Lecture seule | les deux conteneurs | `--read-only` + tmpfs |
 | `pip install --user` sans sudo | `workspace` | |
 | Auto-protection | `ia-dev-containers/` remonté en lecture seule sur lui-même dans `/workspace` (par défaut) | `run.sh doctor` pour le statut, `run.sh test` pour la vérification — voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) |
-| Cohérence CLI / VS Code | Contrat d'isolation, proxy et `IA_CLIENT` générés depuis une source unique — `run.sh shell`/`test` et le devcontainer VS Code ne peuvent pas diverger | `scripts/common.sh`, voir le [README racine](../../README.md#-mesures-de-sécurité-implémentées) |
+| Cohérence CLI / VS Code | Contrat d'isolation, proxy et `IA_CLIENT` générés depuis une source unique — `run.sh shell`/`test` et le devcontainer VS Code ne peuvent pas diverger | `scripts/orchestrator.py`, voir le [README racine](../../README.md#-mesures-de-sécurité-implémentées) |
 | Isolation entre projets | réseau, conteneurs, images overlay, `~/.local` | scopés par projet, voir [README racine](../../README.md#-isolation-entre-projets) |
 | ⚠️ **Non couvert** | `/workspace` | bind-mount du projet réel, pas un volume vide — voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) |
 
