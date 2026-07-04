@@ -19,3 +19,6 @@ gateway-base/certs/*.crt
 gateway-base/certs/*.pem
 workspace-base/certs/*.crt
 workspace-base/certs/*.pem
+
+# Fichiers de travail locaux (notes, handoffs d'agents...), jamais commités.
+tmp/
