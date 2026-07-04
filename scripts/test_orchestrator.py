@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -24,12 +25,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _clean_env(testcase: unittest.TestCase) -> None:
+    patcher = unittest.mock.patch.dict(os.environ)
+    patcher.start()
+    testcase.addCleanup(patcher.stop)
     for name in ("IA_PROJECT_NAME", "IA_SELF_MOUNT_RW", "GATEWAY_ADDR_MODE", "GATEWAY_HARDENED"):
-        if name in os.environ:
-            testcase.addCleanup(os.environ.__setitem__, name, os.environ[name])
-            del os.environ[name]
-        else:
-            testcase.addCleanup(os.environ.pop, name, None)
+        os.environ.pop(name, None)
 
 
 def _make_config(**overrides) -> orch.Config:
@@ -336,7 +336,6 @@ class RenderDevcontainerRealClientsTests(unittest.TestCase):
 
         for client_dir in client_dirs:
             with self.subTest(client=client_dir.name):
-                import tempfile
                 with tempfile.TemporaryDirectory() as tmp:
                     client_root = Path(tmp)
                     config = _client_config_from_lib_sh(client_dir / "scripts" / "lib.sh", client_root)
