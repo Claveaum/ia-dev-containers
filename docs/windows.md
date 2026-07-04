@@ -15,7 +15,7 @@ podman machine init
 podman machine start
 ```
 
-**⚠️ Bug amont connu et actif** ([containers/podman#25201](https://github.com/containers/podman/issues/25201), ouvert 2025-02-03, toujours ouvert au moment de cette recherche) : le driver de pare-feu par défaut de `netavark` (`nftables`) échoue dans une VM `podman machine` provider `wsl`, ce qui peut faire échouer `podman network create --internal` lui-même — pas seulement notre Phase durcie optionnelle (`GATEWAY_HARDENED=1`). Si `./scripts/run.sh up` échoue à la création du réseau avec une erreur `nftables`, voir la [section Dépannage du README racine](../README.md#-dépannage) pour le contournement (`firewall_driver = "iptables"`). **Appliquez ce contournement avant votre premier `run.sh up`**, pas après avoir cru à un bug de ce projet.
+**⚠️ Bug amont connu et actif** ([containers/podman#25201](https://github.com/containers/podman/issues/25201), ouvert 2025-02-03, toujours ouvert au moment de cette recherche) : le driver de pare-feu par défaut de `netavark` (`nftables`) échoue dans une VM `podman machine` provider `wsl`, ce qui peut faire échouer `podman network create --internal` lui-même — pas seulement notre Phase durcie optionnelle (`GATEWAY_HARDENED=1`). Si `./scripts/run.sh up` échoue à la création du réseau avec une erreur `nftables`, voir la [section Dépannage](troubleshooting.md) pour le contournement (`firewall_driver = "iptables"`). **Appliquez ce contournement avant votre premier `run.sh up`**, pas après avoir cru à un bug de ce projet.
 
 ## Option B — Podman installé nativement dans une distribution WSL2 (recommandée par défaut)
 
@@ -32,7 +32,7 @@ Aucun `podman machine` ici : WSL2 fournit déjà un vrai noyau Linux, donc Podma
 ## Utilisation (identique aux deux options, une fois Podman disponible)
 
 Comme sur Linux/macOS, `ia-dev-containers` doit être copié à la racine du
-projet à sandboxer avant tout `run.sh` (voir le [README racine](../README.md#-utilisation-rapide-mistral-vibe-cli)) :
+projet à sandboxer avant tout `run.sh` (voir le [README racine](../README.md)) :
 
 ```bash
 # Depuis la racine de VOTRE projet (pas ce dépôt) :

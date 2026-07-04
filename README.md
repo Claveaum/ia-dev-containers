@@ -3,11 +3,11 @@
 
 Ce projet fournit des **conteneurs Podman sécurisés** pour développer avec des clients IA CLI (Mistral Vibe, GitHub Copilot, etc.) **sans compromettre la sécurité de votre poste de travail**.
 
-**Mode d'emploi** : copiez ce dossier (`ia-dev-containers/`) à la **racine du projet** que vous voulez sandboxer (`mon-projet/ia-dev-containers/`). Le workspace du conteneur est alors un accès direct à `mon-projet/` (bind-mount) : le CLI IA travaille sur les vrais fichiers du projet, pas sur une copie. Plusieurs projets (donc plusieurs copies) peuvent tourner **en parallèle** sur la même machine, chacun isolé du reste (réseau, images, volumes de paquets installés — voir [Isolation entre projets](#-isolation-entre-projets)).
+**Mode d'emploi** : copiez ce dossier (`ia-dev-containers/`) à la **racine du projet** que vous voulez sandboxer (`mon-projet/ia-dev-containers/`). Le workspace du conteneur est alors un accès direct à `mon-projet/` (bind-mount) : le CLI IA travaille sur les vrais fichiers du projet, pas sur une copie. Plusieurs projets (donc plusieurs copies) peuvent tourner **en parallèle** sur la même machine, chacun isolé du reste (réseau, images, volumes de paquets installés — détails dans [docs/architecture.md](docs/architecture.md)).
 
 ---
 
-## 🎯 **Objectifs principaux**
+## 🎯 Objectifs principaux
 
 - ✅ **Isolation totale** : le CLI IA ne peut **pas accéder** à votre système hôte
 - ✅ **Accès réseau contrôlé** : seuls les domaines **nécessaires au développement** sont autorisés
@@ -17,12 +17,12 @@ Ce projet fournit des **conteneurs Podman sécurisés** pour développer avec de
 
 ---
 
-## 🏗️ **Architecture : deux conteneurs (gateway + workspace)**
+## 🏗️ Architecture en bref
 
 Le sandbox repose sur **deux conteneurs séparés**, jamais un seul :
 
-- **`gateway`** : le seul conteneur avec un accès réseau réel. Fait tourner Squid, applique l'allowlist de domaines. Ne contient jamais de code du CLI IA.
-- **`workspace`** : exécute le CLI IA (non fiable par hypothèse). Attaché **uniquement** à un réseau Podman `--internal`, qui n'a **aucune route par défaut vers l'extérieur** — c'est ça, et rien d'autre, qui garantit qu'il ne peut rien joindre en direct.
+- **`gateway`** : le seul conteneur avec un accès réseau réel. Fait tourner Squid, applique l'allowlist de domaines.
+- **`workspace`** : exécute le CLI IA (non fiable par hypothèse). Attaché **uniquement** à un réseau Podman `--internal`, sans route par défaut vers l'extérieur.
 
 ```
                   réseau "podman" (uplink réel)
@@ -37,91 +37,25 @@ Le sandbox repose sur **deux conteneurs séparés**, jamais un seul :
                     └───────────┘
 ```
 
-**Pourquoi cette séparation ?** Un seul conteneur ne peut pas offrir à la fois un vrai accès réseau pour le proxy *et* une garantie noyau que le workload ne peut pas le contourner (`--network=none` empêche les deux à la fois ; sans lui, `HTTP_PROXY` n'est qu'une convention qu'un process hostile peut ignorer). Séparer les deux rôles dans deux conteneurs résout ce dilemme : le `workspace` n'a physiquement aucune interface vers l'extérieur, quel que soit le comportement du CLI IA qu'il exécute.
+Un seul conteneur ne peut pas offrir à la fois un vrai accès réseau pour le proxy *et* une garantie noyau que le workload ne peut pas le contourner — séparer les deux rôles résout ce dilemme. Un durcissement optionnel (`GATEWAY_HARDENED=1`) ajoute des règles nftables verrouillant l'egress du gateway lui-même. Détail complet (pourquoi cette séparation, les deux niveaux de durcissement, structure du dépôt, isolation entre projets) : [docs/architecture.md](docs/architecture.md).
 
-Cette architecture est **construite et testée réellement** (Podman 5.8.3, réseau `--internal`, résolution DNS entre conteneurs via aardvark-dns) — pas seulement documentée sur le papier. Deux niveaux sont disponibles pour le gateway :
-
-- **Phase simple** (`GATEWAY_HARDENED=0`, par défaut) : le gateway tourne directement en utilisateur `nobody`, sans capacité particulière.
-- **Phase durcie** (`GATEWAY_HARDENED=1`) : le gateway démarre root-in-userns, charge des règles **nftables** verrouillant sa propre sortie (ports 80/443 uniquement, blocage des plages RFC1918 et de l'IP de métadonnées cloud `169.254.169.254`), vérifie que `net.ipv4.ip_forward=0`, puis abandonne définitivement ses privilèges vers `nobody` avant de lancer Squid.
-
-> ⚠️ **`/workspace` est un accès direct au projet hôte, pas une copie isolée.** Le CLI IA lit et écrit les vrais fichiers du projet (bind-mount de la racine du projet, pas un volume Podman vide). C'est un choix assumé — le CLI doit pouvoir modifier le code, committer, lancer les outils du projet — mais ça élargit la surface par rapport à un volume vide : un fichier écrit par le CLI IA (hook git, script de build, `package.json`, config CI) peut ensuite s'exécuter **côté hôte** la prochaine fois que vous lancez une commande normale dans ce projet. L'isolation réseau/capacités/utilisateur du sandbox protège la machine hôte pendant que le CLI tourne ; elle ne protège pas rétroactivement le projet contre un fichier malveillant qu'il y aurait laissé. Revoyez les diffs comme vous le feriez pour toute contribution externe.
->
-> ⚠️ **Cas particulier important : `ia-dev-containers/` lui-même est à l'intérieur du bind-mount.** Puisque cette copie est déposée à la racine du projet, elle fait partie de `/workspace`. **Auto-protection par défaut** : un second bind-mount, en lecture seule, est empilé sur `ia-dev-containers/` à l'intérieur du conteneur `workspace` — le CLI IA peut lire sa propre config sandbox (donc `git status`/`git add` lancés depuis le workspace restent normaux sur ces fichiers, qui suivent le dépôt du projet hôte), mais ne peut **plus** modifier `gateway/config/allowed-urls.txt` (élargir sa propre allowlist réseau), `scripts/run.sh`/`lib.sh`, ou les `Dockerfile` en écriture directe. Comme `build_images()` reconstruit l'overlay gateway/workspace à **chaque** `run.sh up`, c'était auparavant un vecteur direct : une allowlist modifiée aurait été reprise (et un script modifié réexécuté avec vos privilèges) dès le lancement suivant. `./scripts/run.sh doctor` affiche l'état de cette auto-protection (`active`, `désactivée`, ou `non applicable`) ; `./scripts/run.sh test` la vérifie (lecture OK, écriture bloquée). Cette protection est automatiquement désactivée dans deux cas où elle n'a pas de sens : la copie a été relocalisée hors de l'arborescence du projet (voir plus bas), ou `ia-dev-containers` est lui-même le projet sandboxé (dogfooding). Une échappatoire explicite existe pour le cas rare où le CLI IA doit modifier sa propre config sandbox depuis l'intérieur : `IA_SELF_MOUNT_RW=1 ./scripts/run.sh up`.
->
-> Cette protection ne couvre que l'**écriture** sur `ia-dev-containers/` lui-même — le reste du projet hôte reste en bind-mount lecture-écriture normal (le CLI doit pouvoir modifier le code, committer, lancer les outils du projet), avec les mêmes implications qu'avant : un fichier écrit par le CLI IA ailleurs dans `/workspace` (hook git, script de build, `package.json`, config CI) peut ensuite s'exécuter côté hôte. Revoyez les diffs comme vous le feriez pour toute contribution externe. Même chose pour `clients/*/.env` s'il existe : la lecture directe par le CLI IA n'est pas changée par cette auto-protection (le mount lecture seule le laisse toujours lisible, pas une fuite nouvelle puisque le CLI a de toute façon la valeur via son environnement) — une raison de plus de préférer `podman secret` (dont le stockage vit hors du mount) pour tout secret que le CLI n'a pas besoin de *lire lui-même* en dehors de son usage normal.
->
-> Si vous préférez éliminer entièrement `ia-dev-containers/` du bind-mount plutôt que de le protéger en lecture seule (par exemple pour empêcher toute lecture, pas seulement l'écriture), l'option de relocalisation reste disponible : déplacer physiquement `ia-dev-containers/` hors de l'arborescence du projet (ex. `~/.ia-sandboxes/mon-projet/ia-dev-containers/`) et lancer avec `IA_PROJECT_ROOT=/chemin/vers/mon-projet ./scripts/run.sh up` — **vérifié** : dans ce cas, `/workspace` ne contient plus `ia-dev-containers/` du tout, le CLI IA n'y a même pas accès en lecture, et l'auto-protection ci-dessus devient un no-op (rien à protéger).
+> ⚠️ **`/workspace` est un accès direct au projet hôte, pas une copie isolée.** Le CLI IA lit et écrit les vrais fichiers du projet — un fichier qu'il y laisse (hook git, script de build, config CI) peut ensuite s'exécuter côté hôte. Revoyez les diffs comme pour toute contribution externe. Cas particulier : `ia-dev-containers/` étant lui-même dans ce bind-mount, il est protégé par défaut en lecture seule sur lui-même (**auto-protection**, visible via `run.sh doctor`) pour empêcher le CLI de modifier sa propre allowlist ou ses propres scripts — voir [docs/architecture.md](docs/architecture.md#workspace-est-un-accès-direct-au-projet-hôte-pas-une-copie-isolée) pour le mécanisme complet et l'option de relocalisation hors du projet.
 
 ---
 
-## 📁 **Structure du projet**
+## 🚀 Démarrage rapide (Mistral Vibe CLI)
 
-```bash
-mon-projet/                        # 🎯 Le projet que vous voulez sandboxer
-├── ia-dev-containers/              # Cette copie, déposée à la racine
-│   ├── gateway-base/               # 📦 Image générique du gateway (Squid, nftables)
-│   │   ├── Dockerfile
-│   │   ├── config/squid.conf       # ACL génériques, pas d'allowlist en dur
-│   │   └── scripts/{entrypoint.sh, gateway.nft, gateway-checks.sh}
-│   │
-│   ├── workspace-base/             # 📦 Image générique du workspace (CLI IA)
-│   │   ├── Dockerfile
-│   │   └── scripts/entrypoint.sh
-│   │
-│   ├── scripts/                    # 🧩 Orchestrateur générique, partagé par tous les clients
-│   │   ├── orchestrator.py         # Python, côté hôte uniquement — up|shell|test|down|secrets|doctor (main()), gabarits de noms, rendu devcontainer.json
-│   │   ├── test_orchestrator.py    # Tests rapides sans Podman de orchestrator.py (python3 scripts/test_orchestrator.py)
-│   │   ├── security-tests.sh       # Batterie de tests générique, copiée dans l'image workspace, source /lib.sh (bash, tourne dans le conteneur)
-│   │   └── devcontainer-skeleton.json.template  # Squelette VS Code partagé, rendu par render_devcontainer()
-│   │
-│   ├── clients/                    # 🎯 Adaptateurs par client IA (seulement ce qui varie)
-│   │   ├── mistral-vibe/           # Adaptateur pour Mistral Vibe CLI (Python)
-│   │   │   ├── gateway/            # Overlay : allowlist de domaines spécifique
-│   │   │   │   ├── Dockerfile
-│   │   │   │   └── config/allowed-urls.txt
-│   │   │   ├── workspace/          # Overlay : Python 3 + pip
-│   │   │   │   └── Dockerfile
-│   │   │   ├── scripts/
-│   │   │   │   ├── lib.sh          # Adaptateur bash : CLIENT_NAME, volume de paquets, domaines testés, SECRETS, callback de test, cosmétique VS Code (DEVCONTAINER_*)
-│   │   │   │   └── run.sh          # Point d'entrée mince : source lib.sh, construit les arguments CLI, exec python3 orchestrator.py
-│   │   │   ├── .devcontainer/
-│   │   │   │   └── devcontainer.json      # Généré par `run.sh up` depuis scripts/devcontainer-skeleton.json.template — pas suivi par git
-│   │   │   ├── .env.example        # Modèle pour les secrets (MISTRAL_API_KEY, ...)
-│   │   │   └── README.md
-│   │   │
-│   │   └── copilot/                # Adaptateur pour GitHub Copilot CLI (Node.js)
-│   │       └── (même structure que mistral-vibe/)
-│   │
-│   └── .gitignore                  # Ignore .env réels et devcontainer.json généré
-│
-├── (vos fichiers de projet, inchangés)
-└── ...
-```
-
-`gateway-base/` et `workspace-base/` sont partagés par les deux clients **et par tous les projets** (aucun contenu spécifique à un projet, un seul tag global profite du cache de layers). `gateway-base` reste sur Alpine **3.24** (pin délibéré, pas `latest` : voir le commentaire en tête du Dockerfile — reproductibilité des builds et audit des versions, pas de cible mobile sur des composants de sécurité comme Squid/nftables). `workspace-base` est sur **Debian bookworm-slim** (glibc) : `@github/copilot` (client Copilot) segfaute de façon reproductible sur un binaire natif lié à musl (Alpine), y compris hors de tout durcissement du sandbox — bug upstream connu (voir le commentaire en tête de `workspace-base/Dockerfile`) — d'où la bascule sur glibc, partagée avec mistral-vibe (Python/pip, sans régression). Le client Copilot copie le runtime Node officiel (`node:22-bookworm-slim`) plutôt que d'utiliser le paquet `nodejs` de Debian (absent/trop ancien dans les dépôts stables) — voir `clients/copilot/workspace/Dockerfile`.
-
-Les images overlay (gateway/workspace de chaque client), le réseau `--internal` et les conteneurs sont en revanche scopés **par projet** (voir [Isolation entre projets](#-isolation-entre-projets)) : deux copies de `ia-dev-containers` dans deux projets différents ne se marchent jamais dessus, y compris lancées en même temps.
-
----
-
-## 🚀 **Utilisation rapide (Mistral Vibe CLI)**
+**Prérequis hôte** : [Podman](https://podman.io/) et `python3` (requis par l'orchestrateur `scripts/orchestrator.py`, côté hôte uniquement — voir [🖥️ Plateformes hôte](#️-plateformes-hôte) plus bas).
 
 ```bash
 # Depuis la racine de VOTRE projet (pas ce dépôt) :
 cp -r /chemin/vers/ia-dev-containers .
 cd ia-dev-containers/clients/mistral-vibe
 
-# Construit les images, crée le réseau interne dédié à ce projet, démarre le gateway
-./scripts/run.sh up
-
-# Lance un shell interactif dans le workspace — /workspace = racine de votre projet
-./scripts/run.sh shell
-
-# Lance la suite de tests de sécurité
-./scripts/run.sh test
-
-# Arrête tout (ajoutez --purge-network pour aussi supprimer le réseau)
-./scripts/run.sh down
+./scripts/run.sh up      # construit les images, crée le réseau interne dédié à ce projet, démarre le gateway
+./scripts/run.sh shell   # shell interactif dans le workspace — /workspace = racine de votre projet
+./scripts/run.sh test    # suite de tests de sécurité
+./scripts/run.sh down    # arrête tout (--purge-network pour aussi supprimer le réseau)
 ```
 
 Une fois dans le workspace :
@@ -130,10 +64,9 @@ pip install --user mistral-vibe
 mistral-vibe
 ```
 
-Pour activer le durcissement du gateway (nftables + abandon de privilèges) :
-```bash
-GATEWAY_HARDENED=1 ./scripts/run.sh up
-```
+Pour activer le durcissement du gateway : `GATEWAY_HARDENED=1 ./scripts/run.sh up`.
+
+Toutes les sous-commandes (`exec`, `purge`, `logs`, `secrets`, `doctor`, ...) et variables d'environnement sont détaillées dans le [README Mistral Vibe](clients/mistral-vibe/README.md).
 
 ### GitHub Copilot CLI
 
@@ -151,87 +84,39 @@ Voir le [README Copilot](clients/copilot/README.md) pour l'authentification et l
 
 ---
 
-## 🖥️ **Plateformes hôte**
+## 🖥️ Plateformes hôte
 
 | Plateforme | Statut | Guide |
 |---|---|---|
 | Linux | ✅ **Testé** (Podman 5.8.3 rootless, netavark) | ce README |
 | macOS | ⚠️ **Expérimental, non vérifié sur matériel réel** | [docs/macos.md](docs/macos.md) |
-| Windows | ⚠️ **Expérimental, non vérifié sur matériel réel** (bug amont connu, voir [Dépannage](#-dépannage)) | [docs/windows.md](docs/windows.md) |
+| Windows | ⚠️ **Expérimental, non vérifié sur matériel réel** (bug amont connu, voir [Dépannage](docs/troubleshooting.md)) | [docs/windows.md](docs/windows.md) |
 
-**Prérequis hôte : Podman et python3.** L'orchestrateur (`scripts/orchestrator.py`, invoqué par chaque `run.sh`) est écrit en Python — `python3` doit être présent sur l'hôte (Linux/macOS l'incluent nativement dans l'immense majorité des cas ; sur Windows, la même installation Python que celle utilisée dans WSL2/Git Bash convient). C'est un changement volontaire par rapport à une version antérieure de ce projet, qui ne dépendait que de Podman + bash côté hôte — voir `CLAUDE.md` pour le détail de ce qui est en Python (uniquement `scripts/orchestrator.py`, côté hôte) vs. ce qui reste en bash (tout ce qui tourne dans les conteneurs, et `clients/*/scripts/lib.sh`).
-
-Sur macOS/Windows, Podman ne tourne jamais nativement : il passe par une VM Linux (`podman machine`). L'architecture (isolation réseau par topologie, allowlist Squid) devrait s'y comporter à l'identique — mais ça n'a été vérifié que par analyse de l'architecture de `podman machine`, pas par exécution réelle. Tant que ce n'est pas fait, ces deux plateformes restent étiquetées expérimentales, dans le même esprit que la limite déjà documentée pour le client Copilot ("session authentifiée non testée") : ne rien affirmer de vérifié qui ne l'est pas.
-
-`./scripts/run.sh doctor` (dans chaque client) diagnostique la plateforme hôte et l'état de la VM `podman machine` le cas échéant.
+Sur macOS/Windows, Podman passe par une VM Linux (`podman machine`) — l'architecture devrait s'y comporter à l'identique, mais ça n'a été vérifié que par analyse, pas par exécution réelle sur matériel réel. `./scripts/run.sh doctor` (dans chaque client) diagnostique la plateforme hôte et l'état de la VM le cas échéant.
 
 ---
 
-## 🔀 **Isolation entre projets**
+## 🔒 Sécurité
 
-Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME`) du nom du dossier qui la contient, et l'utilise pour scoper toutes les ressources Podman qu'elle crée — pas de registre central, pas de coordination requise entre projets :
+Isolation réseau par topologie (pas par convention), allowlist de domaines côté gateway (Squid), `--cap-drop=ALL` + lecture seule + non-root sur les deux conteneurs, secrets via `podman secret` (jamais `-e CLE=valeur`), auto-protection de `ia-dev-containers/` en lecture seule sur lui-même, isolation des ressources Podman par projet.
 
-| Ressource | Scope | Pourquoi |
-|---|---|---|
-| Réseau `--internal` (subnet `/24` dans `10.89.0.0/16`) | par (projet, client) | Podman refuse deux réseaux sur le même subnet ; le subnet est dérivé du chemin absolu du projet (`cksum`), avec repli séquentiel en cas de collision rare |
-| Conteneurs `gateway`/`workspace` | par (projet, client) | noms uniques, pas de conflit si plusieurs projets tournent en même temps |
-| Images overlay (gateway/workspace de chaque client) | par (projet, client) | l'allowlist Squid d'un projet ne doit jamais écraser silencieusement le même tag pendant qu'un autre projet tourne encore dessus |
-| Images `*-base` (gateway-base, workspace-base) | **globales** | aucun contenu spécifique à un projet — un seul tag partagé profite du cache de layers |
-| Volume des paquets installés (`~/.local` pip, `~/.npm-global` npm) | par projet | ce sont de VRAIS paquets installés par le CLI IA, pas un simple cache : un paquet compromis installé dans un projet ne doit pas devenir importable depuis un autre |
-| Volume de cache de téléchargement (`~/.cache`) | par projet | même raisonnement que le volume de paquets : le cache HTTP pip/npm est un vecteur d'installation (un artefact empoisonné déposé par un CLI compromis dans un projet serait réinstallé sans revalidation de hash par un autre). Coût assumé : chaque nouveau projet repart avec un cache vide |
-| Volume d'état persistant du CLI (`~/.copilot` pour Copilot — session, jeton d'auth ; optionnel, absent pour un client qui n'en a pas besoin) | par projet | même raisonnement que le volume de paquets : un jeton d'auth compromis dans un projet ne doit pas être silencieusement réutilisable depuis un autre |
-
-`./scripts/run.sh doctor` affiche le nom de projet détecté et le réseau qui lui correspond. Deux projets qui portent le même nom de dossier entreraient en collision de noms de ressources ; forcez un nom explicite avec `IA_PROJECT_NAME=mon-projet-2 ./scripts/run.sh up` dans ce cas.
-
-**Vérifié dans ce sandbox** : deux projets factices, chacun avec sa propre copie de `ia-dev-containers`, lancés simultanément (`run.sh up` sur les deux) — réseaux et subnets distincts confirmés (`podman network inspect`), gateways des deux projets actifs en parallèle, workspace de chacun ne voyant que ses propres fichiers, suite de sécurité complète (14/14) rejouée avec succès dans ce contexte multi-projets.
+Table complète des mesures, limites connues (ex. allowlist qui réduit l'exfiltration sans l'éliminer, comportement sous Podman rootful/SELinux) et bonnes pratiques d'exploitation : [docs/security.md](docs/security.md).
 
 ---
 
-## 🔒 **Mesures de sécurité implémentées**
+## 🛠 Personnalisation
 
-| **Catégorie** | **Mesure** | **Où** |
-|--------------|------------|--------|
-| **Isolation réseau** | Aucune route par défaut vers l'extérieur | `workspace`, réseau `--internal` |
-| **Isolation réseau** | Seul point d'accès réel à internet | `gateway` (double-attaché) |
-| **Filtrage** | Allowlist de domaines | Squid ACL `dstdomain`, dans `gateway` |
-| **Défense en profondeur** | Verrouillage de l'egress du gateway lui-même | nftables (`GATEWAY_HARDENED=1`) |
-| **Défense en profondeur** | Le gateway ne peut jamais router entre ses deux interfaces | chaîne `forward` nftables vide, `ip_forward=0` vérifié au démarrage |
-| **Isolation utilisateur** | Non-root partout | `workspace` (UID 1000), `gateway` (nobody) |
-| **Isolation utilisateur** | Abandon définitif des privilèges | `gateway` : `su-exec nobody` après chargement des règles réseau |
-| **Isolation filesystem** | Lecture seule | `--read-only` + tmpfs sur les deux conteneurs |
-| **Capacités** | `--cap-drop=ALL` sur les deux conteneurs | capacités ajoutées seulement temporairement sur le gateway durci |
-| **Cohérence CLI / VS Code** | Le contrat d'isolation du workspace (`--userns`, `--cap-drop`, `--read-only`, `--tmpfs`, `--security-opt`), l'URL du proxy et `IA_CLIENT` sont générés depuis une source unique (`WORKSPACE_SECURITY_ARGS`/`proxy_url()`/`CLIENT_NAME`, `scripts/orchestrator.py`) — les deux chemins de lancement ne peuvent pas diverger | `run.sh shell`/`test` (`podman run` direct) et `.devcontainer/devcontainer.json` (VS Code), rendu par `render_devcontainer()` |
-| **Installation de dépendances** | `pip install --user` sans sudo | `workspace` |
-| **Secrets** | `podman secret` (type=env), repli `--env-file .env` | `run.sh secrets` pour le statut ; jamais `-e CLE=valeur` |
-| **Audit** | Tests automatiques exécutés contre le vrai gateway | `run.sh test` / `security-tests.sh` |
-| **Isolation projet** | Réseau/conteneurs/images overlay/paquets installés scopés par projet | voir [Isolation entre projets](#-isolation-entre-projets) |
-| **Auto-protection** | `ia-dev-containers/` remonté en lecture seule sur lui-même dans `/workspace` (par défaut) | `run.sh doctor` pour le statut, `run.sh test` pour la vérification ; voir l'avertissement dans [Architecture](#️-architecture--deux-conteneurs-gateway--workspace) |
-| ⚠️ **Non couvert** | `/workspace` = bind-mount du projet réel, pas un volume vide (au-delà de `ia-dev-containers/` lui-même, protégé ci-dessus) | voir l'avertissement dans [Architecture](#️-architecture--deux-conteneurs-gateway--workspace) |
-| ⚠️ **Vérifié rootless uniquement** | `security-tests.sh` sonde la passerelle du bridge (`10.x.x.1`) sur les ports 22/80 et attend un échec. En Podman **rootful**, cette IP est l'hôte réel : tout service y écoutant sur `0.0.0.0` serait joignable depuis le workspace malgré `--internal` | `run.sh test`, section 3 (« Isolation réseau ») |
-| ⚠️ **Affaibli sous SELinux** (Fedora/RHEL) | `workspace` tourne avec `--security-opt=label=disable` (confinement SELinux désactivé pour ce conteneur) | nécessaire pour que le bind-mount `/workspace` soit accessible sans relabeler les fichiers réels du projet sur disque (l'alternative `:Z` le ferait, effet de bord permanent hors du sandbox) ; no-op sur les hôtes sans SELinux (macOS, Windows, la plupart des distributions Linux hors Fedora/RHEL) |
-| ⚠️ **Non vérifié en session VS Code réelle** | `initializeCommand` (`./scripts/run.sh up`) dans `devcontainer.json` suppose que VS Code l'exécute avec pour cwd le dossier ouvert (`clients/<client>/`) — validé seulement par lecture du JSON généré et de la doc devcontainers, pas par une ouverture VS Code réelle | si l'ouverture échoue à cause de cette ligne, retirez `initializeCommand` de `scripts/devcontainer-skeleton.json.template` et revenez à l'étape manuelle (`cd clients/<client> && ./scripts/run.sh up` avant d'ouvrir VS Code) |
+Ajouter un nouveau client IA ne demande d'écrire que ce qui varie réellement (allowlist, Dockerfile, `lib.sh`) — toute l'orchestration (build, mounts, devcontainer, tests) est générique et partagée. Marche à suivre complète : [docs/adding-a-client.md](docs/adding-a-client.md).
 
 ---
 
-## 🌐 **URLs autorisées par défaut (Mistral Vibe)**
+## 🔧 Dépannage
 
-*(Pour Copilot, voir [clients/copilot/README.md](clients/copilot/README.md#-domaines-autorisés-par-défaut).)*
-
-- **Mistral AI** : `api.mistral.ai`, `mistral.ai`
-- **GitHub** : `github.com`, `api.github.com`, `raw.githubusercontent.com`, `camo.githubusercontent.com`, `user-images.githubusercontent.com`
-- **PyPI** : `pypi.org`, `pypi.python.org`, `files.pythonhosted.org`
-- **Hugging Face** : `huggingface.co`, `api.huggingface.co`, `cdn.huggingface.co`
-- **CDN** : `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`
-
-> ⚠️ **Pour ajouter un domaine** : modifiez `clients/mistral-vibe/gateway/config/allowed-urls.txt` puis relancez `./scripts/run.sh down && ./scripts/run.sh up`. Raccourci déjà assez léger, pas la peine de le durcir davantage : `down` (sans `--purge-network`) ne touche pas au réseau, seul le conteneur `gateway` est recréé, `--purge-network` reste inutile ici ; `build_images()` reconstruit bien les 4 images à chaque fois, mais le cache de layers rend celle qui compte (l'overlay `gateway` du client, 2 lignes de Dockerfile après `allowed-urls.txt`) quasi instantanée — seule la couche `COPY allowed-urls.txt` et ce qui la suit sont rejoués, `gateway-base`/`workspace-base`/l'overlay `workspace` restent en cache. Si un `run.sh shell` tournait dans un autre terminal, il faudra juste le relancer : le workspace est éphémère (`--rm`), `down` ne fait qu'accélérer sa fin.
-
-> ⚠️ **Limite connue** : l'allowlist par domaine *réduit* le risque d'exfiltration, elle ne l'élimine pas. Des domaines autorisés comme `github.com` ou `huggingface.co` exposent des surfaces en écriture (gists, issues, upload de modèles) qui restent un vecteur résiduel.
-
-> ⚠️ **Contrainte assumée** : seuls les remotes git en **HTTPS** fonctionnent. Le SSH (port 22) n'est pas relayé par le gateway.
+Workspace qui ne démarre pas, gateway injoignable, domaine bloqué, bug Podman/nftables connu sous Windows, proxy corporate avec inspection TLS, mise à jour d'une copie déjà déployée : voir [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ---
 
-## 📋 **Comparatif des solutions**
+## 📋 Comparatif des solutions
 
 | **Client** | **Langage** | **Statut** |
 |-----------|-------------|-----------|
@@ -240,122 +125,19 @@ Chaque copie de `ia-dev-containers` déduit son **nom de projet** (`PROJECT_NAME
 
 ---
 
-## 🛠 **Personnalisation**
-
-### Ajouter un nouveau client IA
-
-L'orchestration (up/shell/test/down/secrets/doctor, construction des images, mounts, rendu du devcontainer, batterie de tests, vérifications côté gateway) est générique et vit dans `scripts/orchestrator.py` (Python, côté hôte) + `scripts/security-tests.sh` + `gateway-base/scripts/gateway-checks.sh` (bash, dans les conteneurs), partagés par tous les clients. Un nouveau client n'a besoin d'écrire que ce qui varie réellement pour lui :
-
-1. Créer `clients/<nom-du-client>/gateway/` avec un `Dockerfile` (`FROM ia-dev-containers-gateway-base:latest`) + `config/allowed-urls.txt` — rien d'autre, `gateway-checks.sh` est déjà hérité de `gateway-base/`.
-2. Créer `clients/<nom-du-client>/workspace/` avec un `Dockerfile` (`FROM ia-dev-containers-workspace-base:latest`), qui doit se terminer par `USER devuser` (tout ce qui précède, comme `apt-get install`, a besoin de root). N'installez jamais le CLI IA lui-même au build (comme pip/npm au runtime pour les clients existants) : `HTTP_PROXY` ne pointe vers un `gateway` joignable qu'au runtime, pas au moment du build. Le Dockerfile doit aussi `COPY` `scripts/security-tests.sh` (partagé) et le `lib.sh` du client (voir `clients/mistral-vibe/workspace/Dockerfile` pour les chemins exacts — le contexte de build est la racine du dépôt, pas `clients/<nom-du-client>/`). `workspace-base` ne prépare que `~/.cache` (seul chemin réellement générique) : le Dockerfile du client doit lui-même `RUN /prepare-state-dir.sh /chemin/de/PKG_VOLUME_TARGET` pour son propre volume de paquets — sinon le premier montage du volume nommé dessus serait root:root, illisible en écriture (voir `clients/mistral-vibe/workspace/Dockerfile` pour `~/.local`, `clients/copilot/workspace/Dockerfile` pour `~/.npm-global`).
-3. Créer `clients/<nom-du-client>/scripts/lib.sh` — l'adaptateur, en copiant `clients/mistral-vibe/scripts/lib.sh` comme modèle. Il déclare uniquement : `CLIENT_NAME`, `PKG_VOLUME_TARGET` (chemin du volume de paquets, ex. `/home/devuser/.local`), `PKG_INSTALL_LABEL`, `TEST_DOMAIN_PRIMARY`/`TEST_DOMAIN_SECONDARY`, `SECRETS`, et la fonction `client_package_manager_tests()` (vérifications propres au gestionnaire de paquets). En option, `EXTRA_VOLUMES` (tableau de chemins cibles simples, ex. `"/home/devuser/.copilot"`) si le CLI a besoin d'écrire un état persistant (session, jeton d'auth) hors de `PKG_VOLUME_TARGET` — sinon le CLI risque de planter en silence au premier lancement faute de pouvoir écrire sous `$HOME` en lecture seule (voir `clients/copilot/scripts/lib.sh`) ; laisser vide (ou absent) si non applicable, comme mistral-vibe aujourd'hui. Un client peut en déclarer plusieurs entrées. Pour chaque entrée (comme pour `PKG_VOLUME_TARGET`, voir étape 2), préparer le répertoire cible dans son Dockerfile via `RUN /prepare-state-dir.sh /chemin/cible` (script générique hérité de `workspace-base`, ne pas refaire un `mkdir`/`chown` à la main — voir `clients/copilot/workspace/Dockerfile` : au-delà du piège classique de volume nommé root:root, ce script pose aussi le bit setgid + écriture groupe, requis pour qu'un host dont l'UID diffère de celui de `devuser` — ex. macOS — puisse écrire via `--userns=keep-id`) ; **aucun jeton devcontainer à déclarer** — le mount correspondant est généré automatiquement (voir plus bas). `lib.sh` déclare aussi les quatre variables cosmétiques du devcontainer VS Code : `DEVCONTAINER_DISPLAY_NAME` (nom affiché), `DEVCONTAINER_EXTENSIONS` (tableau d'IDs d'extensions), `DEVCONTAINER_SETTINGS_JSON` (fragment JSON brut de `customizations.vscode.settings`, vide si aucun réglage propre au client), `PKG_INSTALL_HINT` (commande affichée dans le message de bienvenue). Tout le reste (noms de ressources Podman, allocation de subnet dans `10.89.0.0/16` via `ensure_network_and_ip`, contenu de `mounts`/`runArgs` du devcontainer) en découle automatiquement depuis `scripts/orchestrator.py` (`render_devcontainer()`, à partir du squelette partagé `scripts/devcontainer-skeleton.json.template` — pas de fichier `.devcontainer/devcontainer.json.template` à créer par client) — pas d'attribution manuelle de `/24`, de nom de ressource, ni de JSON de mounts nécessaire.
-4. Créer `clients/<nom-du-client>/scripts/run.sh` — copier celui de `clients/mistral-vibe/scripts/` tel quel (il ne contient plus rien de spécifique à un client, juste le câblage `source lib.sh` + délégation).
-5. `./scripts/run.sh up` puis `./scripts/run.sh test` pour construire et valider réellement (pas seulement lire le code).
-
----
-
-## 🔧 **Dépannage**
-
-### Le workspace ne démarre pas / le réseau n'existe pas
-Le workspace ne peut s'attacher qu'à un réseau `--internal` déjà créé (nom scopé par projet, ex. `ia-gw-internal-mistral-vibe-mon-projet` — voir `./scripts/run.sh doctor`). Lancez toujours `./scripts/run.sh up` (qui crée le réseau et démarre le gateway) avant `./scripts/run.sh shell`.
-
-### Le gateway ne répond pas
-```bash
-# Nom de conteneur scopé par projet : <client>-<projet>-gateway (voir `run.sh doctor`)
-podman ps --filter name=-gateway
-podman logs <nom-du-conteneur-gateway>
-podman exec <nom-du-conteneur-gateway> /gateway-checks.sh   # utilisateur squid, ip_forward, capacités
-```
-
-### Un domaine nécessaire est bloqué
-Ajoutez-le à `clients/mistral-vibe/gateway/config/allowed-urls.txt`, puis reconstruisez (`./scripts/run.sh down && ./scripts/run.sh up`).
-
-### Vérifier le proxy manuellement
-```bash
-./scripts/run.sh shell -- curl -x http://gateway:3128 https://github.com   # doit réussir
-./scripts/run.sh shell -- curl --noproxy '*' https://1.1.1.1               # doit échouer (network unreachable)
-```
-
-### Windows (podman machine, provider `wsl`) : `podman network create --internal` échoue avec une erreur nftables
-
-**Symptôme** : `./scripts/run.sh up` échoue à la création du réseau avec un message du type `nftables error: nft did not return successfully while applying ruleset` ou `Could not process rule: No such file or directory`.
-
-**Cause** : bug amont connu, pas spécifique à ce projet — [containers/podman#25201](https://github.com/containers/podman/issues/25201) (ouvert le 2025-02-03, encore ouvert au moment de cette recherche, 2026-07). Le driver de pare-feu par défaut de `netavark` (`nftables`) est cassé dans une VM `podman machine` provider `wsl` sous Windows. C'est le pare-feu **interne** de Podman/netavark (utilisé pour implémenter `--internal`) qui est en cause — pas les règles nftables que notre propre `gateway` charge en Phase durcie (`GATEWAY_HARDENED=1`) via `nft -f`, qui s'exécutent dans un conteneur Linux classique et sont un mécanisme totalement indépendant portant juste le même nom.
-
-**Contournement documenté en amont** : forcer `netavark` sur `iptables`. Dans la VM (`podman machine ssh`), créez/éditez `~/.config/containers/containers.conf` :
-```toml
-[network]
-firewall_driver = "iptables"
-```
-puis `podman machine stop && podman machine start`.
-
-**Alternative recommandée** : installer Podman directement dans une distribution WSL2 (`apt install podman` sous Ubuntu-on-WSL2), sans passer par `podman machine` — WSL2 fournit déjà un vrai noyau Linux, ce qui rend ce chemin équivalent à Linux natif et contourne ce bug de provider. Voir [docs/windows.md](docs/windows.md).
-
-**Statut** : contournement rapporté par l'upstream Podman ; **non vérifié sur matériel Windows réel** dans le cadre de ce projet (voir [🖥️ Plateformes hôte](#️-plateformes-hôte) plus haut).
-
----
-
-### Réseau d'entreprise avec inspection TLS (proxy corporate)
-
-**Symptôme** : `podman build`/`podman pull` échouent avec une erreur de certificat, ou `apt-get install`/`pip install`/`npm install`/`git clone https://...` échouent dans le conteneur `workspace` avec une erreur TLS (`certificate verify failed`, `SSL certificate problem`), alors que `./scripts/run.sh shell -- curl -x http://gateway:3128 https://github.com` (voir plus haut) échoue aussi.
-
-**Cause** : un équipement réseau d'entreprise intercepte le TLS sortant (port 443) et présente un certificat signé par une CA interne à la place du vrai certificat du serveur. Squid (`gateway`) ne fait que relayer le `CONNECT` sans déchiffrer (pas de `ssl-bump` dans `gateway-base/config/squid.conf`) : c'est donc le magasin de confiance **à l'intérieur** du conteneur `workspace` (où le TLS se termine réellement, côté `git`/`curl`/`pip`/`npm`) qui doit connaître la CA d'entreprise — pas seulement celui de l'hôte.
-
-**Résolution en deux temps** :
-
-1. **Hôte / VM `podman machine`** (prérequis — sinon `podman build`/`pull` échouent avant même d'atteindre un Dockerfile de ce projet) :
-   - Linux natif : `/etc/pki/ca-trust/source/anchors/` + `update-ca-trust extract` (Fedora/RHEL), ou `/usr/local/share/ca-certificates/` + `update-ca-certificates` (Debian/Ubuntu).
-   - macOS/Windows (`podman machine`) : la CA doit être installée **dans la VM**, pas sur l'hôte — `podman machine ssh`, puis même procédure que Linux natif ci-dessus. ⚠️ Non persistant : `podman machine rm`/`init` recrée une VM vierge, il faut la réinstaller après. Voir [docs/macos.md](docs/macos.md) / [docs/windows.md](docs/windows.md).
-
-2. **Images du projet** : déposez le certificat de la CA d'entreprise (format PEM, extension `.crt`) dans `gateway-base/certs/` **et** `workspace-base/certs/` (dossiers vides par défaut, ignorés par git — voir `.gitignore`), puis forcez un rebuild sans cache. `build_images()` (`scripts/orchestrator.py`) relance bien les 4 `podman build` à chaque `run.sh up`/`shell`/`test`, mais avec le cache de layers Docker/Podman activé : `--no-cache` reste nécessaire ici non pas pour forcer la reconstruction, mais pour rafraîchir des étapes qui, elles, resteraient en cache alors qu'elles doivent se rejouer (ex. `apk upgrade`/`apt-get update`) — le `COPY` du certificat invalide déjà de lui-même les étapes qui le suivent :
-   ```bash
-   podman build --no-cache -t ia-dev-containers-gateway-base:latest   gateway-base/
-   podman build --no-cache -t ia-dev-containers-workspace-base:latest workspace-base/
-   ```
-   Vérification : `podman run --rm --user 1000:1000 ia-dev-containers-workspace-base:latest grep -c 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt` doit afficher un compte supérieur à celui obtenu sans le fichier déposé.
-
-**Cas non couvert** : si le réseau exige en plus un **proxy HTTP(S) explicite obligatoire** pour toute sortie (le gateway ne peut pas joindre internet directement, même avec la CA en place), il faudrait chaîner Squid vers ce proxy amont (`cache_peer` dans `gateway-base/config/squid.conf`) — non implémenté ici, à traiter séparément si besoin confirmé.
-
-**Registre privé/auto-signé** (non applicable aujourd'hui — le projet ne pull que depuis Docker Hub public) : Podman a son propre mécanisme, indépendant de ce qui précède — `/etc/containers/certs.d/<host[:port]>/ca.crt` (rootful) ou `~/.config/containers/certs.d/<host[:port]>/ca.crt` (rootless).
-
----
-
-## 🎓 **Bonnes pratiques**
-
-1. **Secrets** : `podman secret create <nom> -` plutôt que `.env` (`.env` reste un repli valide) — le gain vérifié est que la valeur n'apparaît jamais dans `podman inspect`, ce n'est pas un chiffrement au repos. Jamais de `-e CLE=valeur` sur la ligne de commande. `./scripts/run.sh secrets` affiche le statut.
-2. **Mettez à jour régulièrement** les images de base (`podman build --no-cache`). Toute modification de `gateway-base/certs/` ou `workspace-base/certs/` (CA d'entreprise, voir [Dépannage](#réseau-dentreprise-avec-inspection-tls-proxy-corporate)) nécessite le même rebuild forcé.
-3. **Ne contournez jamais le gateway** : c'est la seule protection contre l'exfiltration. Pour un nouveau besoin réseau, ajoutez le domaine à l'allowlist plutôt que de désactiver le filtrage.
-4. **`GATEWAY_HARDENED=1` (Phase durcie) reste opt-in, pas activé par défaut délibérément.** Coût mesuré négligeable (~10ms au démarrage) sur Linux natif, où c'est un pur gain de défense en profondeur (nftables sur l'egress du gateway, au cas où l'allowlist applicative serait un jour contournée). Mais la Phase durcie démarre le conteneur root-in-userns avec `--cap-add=NET_ADMIN,NET_RAW,SETUID,SETGID` (`entrypoint.sh` a `set -eu` : si `nft -f` échoue ou si l'environnement refuse ces capacités, le gateway crashe au démarrage plutôt que de dégrader gracieusement) — un chemin jamais exercé en conditions réelles sur macOS/Windows (`podman machine`), déjà étiquetés expérimentaux (voir [🖥️ Plateformes hôte](#️-plateformes-hôte)). Activez-la si vous tournez sur Linux natif et voulez cette couche supplémentaire ; sur macOS/Windows, ou en cas de doute, le défaut `=0` (nobody direct, zéro capacité ajoutée) reste le choix le plus robuste — l'allowlist Squid est de toute façon la protection principale, pas cette défense en profondeur.
-
----
-
-## 📚 **Documentation par client**
+## 📚 Documentation
 
 - **[Mistral Vibe CLI](clients/mistral-vibe/README.md)** — solution complète, testée
 - **[GitHub Copilot CLI](clients/copilot/README.md)** — solution complète, testée (mécanique du sandbox ; session authentifiée non testée)
+- **[docs/architecture.md](docs/architecture.md)** — architecture détaillée, bind-mount, auto-protection, structure du projet, isolation entre projets
+- **[docs/security.md](docs/security.md)** — mesures de sécurité complètes, limites connues, bonnes pratiques
+- **[docs/adding-a-client.md](docs/adding-a-client.md)** — ajouter un nouveau client IA
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** — dépannage et mise à jour d'une copie déployée
+- **[docs/macos.md](docs/macos.md)** / **[docs/windows.md](docs/windows.md)** — guides plateforme (expérimentaux)
 
 ---
 
-## 🔄 **Mettre à jour une copie déployée**
-
-Le modèle de déploiement de ce projet est la copie (`mon-projet/ia-dev-containers/`), pas un sous-module git ni un package versionné : il n'y a donc pas d'historique de mise à jour automatique. Procédure recommandée — bon sens, pas une commande outillée ni testée par ce projet (voir `CLAUDE.md` : ne rien affirmer de vérifié qui ne l'est pas) :
-
-1. **Identifiez ce qui est spécifique à votre copie**, à ne jamais écraser : `clients/<client>/gateway/config/allowed-urls.txt` (votre allowlist), `clients/<client>/.env` (vos secrets en repli), tout client que vous auriez ajouté vous-même sous `clients/<nouveau-client>/`, et `clients/<client>/.devcontainer/devcontainer.json` (**généré** par `run.sh up`, ne jamais le fusionner à la main — il sera régénéré à l'étape 4).
-2. Tout le reste (`scripts/`, `gateway-base/`, `workspace-base/`, `clients/*/scripts/{lib.sh,run.sh}` et `clients/*/workspace/Dockerfile` pour les clients déjà fournis) est générique et peut être remplacé intégralement par la nouvelle version.
-3. Récupérez la nouvelle version (`git clone`/`git pull` du dépôt source ailleurs, ou archive), puis copiez par-dessus votre copie déployée en excluant les chemins de l'étape 1, par exemple :
-   ```bash
-   rsync -av --delete \
-     --exclude 'clients/*/gateway/config/allowed-urls.txt' \
-     --exclude 'clients/*/.env' \
-     --exclude 'clients/*/.devcontainer/' \
-     /chemin/vers/nouvelle-version/ mon-projet/ia-dev-containers/
-   ```
-   Si votre copie est déjà suivie par le git de `mon-projet` (recommandé), `git diff` avant de committer montre exactement ce qui change — relisez-le, en particulier tout ce qui touche à `gateway-base/`, `workspace-base/` (durcissement) et `scripts/security-tests.sh` (garanties vérifiées).
-4. **Régénérez et validez aux deux niveaux**, pas seulement une relecture du diff : `./scripts/run.sh down --purge-network && ./scripts/run.sh up && ./scripts/run.sh test` (régénère `devcontainer.json`, force la reconstruction des images, revalide réellement les garanties du sandbox).
-
----
-
-## 🤝 **Contribuer**
+## 🤝 Contribuer
 
 1. Forker le projet
 2. Créer une branche (`git checkout -b feature/ma-fonctionnalité`)
@@ -364,13 +146,13 @@ Le modèle de déploiement de ce projet est la copie (`mon-projet/ia-dev-contain
 
 ---
 
-## 📜 **Licence**
+## 📜 Licence
 
 MIT - Libre d'utiliser, modifier et distribuer.
 
 ---
 
-## 📧 **Support**
+## 📧 Support
 
 1. Consultez les READMEs spécifiques à chaque client
 2. Vérifiez les logs (`podman ps --filter name=-gateway`, puis `podman logs <nom>`)

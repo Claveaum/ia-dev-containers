@@ -6,11 +6,11 @@
 
 ## 🎯 **Principe**
 
-Même architecture que [Mistral Vibe](../mistral-vibe/README.md) : un conteneur **`workspace`** sans route réseau directe, qui ne peut joindre qu'un conteneur **`gateway`** séparé appliquant une allowlist de domaines via Squid. Voir le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour le détail de l'architecture.
+Même architecture que [Mistral Vibe](../mistral-vibe/README.md) : un conteneur **`workspace`** sans route réseau directe, qui ne peut joindre qu'un conteneur **`gateway`** séparé appliquant une allowlist de domaines via Squid. Voir [docs/architecture.md](../../docs/architecture.md) pour le détail de l'architecture.
 
-Réseau interne dédié, scopé par (client, projet) — distinct de celui de mistral-vibe, et distinct entre deux projets différents — pour que plusieurs clients et plusieurs projets puissent tourner simultanément sans conflit de subnet Podman (voir [Isolation entre projets](../../README.md#-isolation-entre-projets) dans le README racine).
+Réseau interne dédié, scopé par (client, projet) — distinct de celui de mistral-vibe, et distinct entre deux projets différents — pour que plusieurs clients et plusieurs projets puissent tourner simultanément sans conflit de subnet Podman (voir [Isolation entre projets](../../docs/architecture.md#isolation-entre-projets)).
 
-**Ce dossier `ia-dev-containers` est prévu pour être copié à la racine du projet à sandboxer** (`mon-projet/ia-dev-containers/`). `/workspace` dans le conteneur est alors un accès direct à la racine du projet (bind-mount), pas une copie ni un volume vide — le CLI IA travaille sur les vrais fichiers. Voir l'avertissement dans le [README racine](../../README.md#️-architecture--deux-conteneurs-gateway--workspace) pour les implications.
+**Ce dossier `ia-dev-containers` est prévu pour être copié à la racine du projet à sandboxer** (`mon-projet/ia-dev-containers/`). `/workspace` dans le conteneur est alors un accès direct à la racine du projet (bind-mount), pas une copie ni un volume vide — le CLI IA travaille sur les vrais fichiers. Voir l'avertissement dans [docs/architecture.md](../../docs/architecture.md#workspace-est-un-accès-direct-au-projet-hôte-pas-une-copie-isolée) pour les implications.
 
 ---
 
