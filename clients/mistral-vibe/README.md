@@ -146,7 +146,7 @@ Ce que le script vérifie réellement (exécuté depuis le workspace, contre le 
 2. Le workspace **peut** atteindre un domaine autorisé via le gateway (`curl -x http://gateway:3128 https://pypi.org` → 200).
 3. Le workspace **ne peut pas** atteindre un domaine non autorisé via le gateway (`curl -x http://gateway:3128 https://facebook.com` → 403).
 
-Plus les vérifications habituelles : non-root, sudo bloqué, filesystem en lecture seule, `ia-dev-containers/` lisible mais protégé en écriture (auto-protection, voir le tableau ci-dessus), `~/.local` inscriptible, Python/pip disponibles.
+Plus les vérifications habituelles : non-root, sudo absent, résolution DNS externe bloquée, passerelle du bridge injoignable, filesystem en lecture seule, `ia-dev-containers/` lisible mais protégé en écriture (auto-protection, voir le tableau ci-dessus), `~/.local` inscriptible, Python/pip disponibles.
 
 Vérifications côté gateway (utilisateur effectif de Squid, `ip_forward`, capacités) :
 ```bash

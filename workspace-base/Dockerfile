@@ -46,8 +46,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         findutils \
         git \
         curl \
-        openssh-client \
-        sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Confiance CA d'entreprise, partie 2/2 ---
@@ -59,15 +57,7 @@ RUN update-ca-certificates
 
 RUN groupadd -g ${USER_GID} ${USERNAME} && \
     useradd -m -u ${USER_UID} -g ${USERNAME} -s /bin/bash ${USERNAME} && \
-    mkdir -p /home/${USERNAME}/.ssh && \
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
-
-# sudo nécessite un mot de passe ET son binaire perd son bit setuid : double
-# verrou (défense en profondeur), aucun des deux ne suffirait seul à masquer
-# l'autre s'il était mal configuré.
-RUN echo "${USERNAME} ALL=(ALL) PASSWD: ALL" > /etc/sudoers.d/${USERNAME} && \
-    chmod 0440 /etc/sudoers.d/${USERNAME} && \
-    chmod 555 /usr/bin/sudo
 
 COPY scripts/prepare-state-dir.sh /prepare-state-dir.sh
 RUN chmod +x /prepare-state-dir.sh

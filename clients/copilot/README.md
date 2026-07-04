@@ -110,7 +110,7 @@ Pour ajouter un domaine : éditer `gateway/config/allowed-urls.txt`, puis `./scr
 ./scripts/run.sh test
 ```
 
-En plus des vérifications communes (non-root, sudo bloqué, lecture seule, `ia-dev-containers/` lisible mais protégé en écriture — auto-protection, voir le [tableau mistral-vibe](../mistral-vibe/README.md#-mesures-de-sécurité), Node/npm disponibles), ce test vérifie spécifiquement que `api.githubcopilot.com` passe par l'allowlist — un test discriminant pour le matching de sous-domaine Squid (`.githubcopilot.com` avec point de tête matche les sous-domaines, une entrée sans point ne matcherait que l'hôte exact).
+En plus des vérifications communes (non-root, sudo absent, lecture seule, résolution DNS externe bloquée, passerelle du bridge injoignable, `ia-dev-containers/` lisible mais protégé en écriture — auto-protection, voir le [tableau mistral-vibe](../mistral-vibe/README.md#-mesures-de-sécurité), Node/npm disponibles), ce test vérifie spécifiquement que `api.githubcopilot.com` passe par l'allowlist — un test discriminant pour le matching de sous-domaine Squid (`.githubcopilot.com` avec point de tête matche les sous-domaines, une entrée sans point ne matcherait que l'hôte exact).
 
 ```bash
 # Nom de conteneur scopé par projet : copilot-<projet>-gateway (voir `run.sh doctor`)

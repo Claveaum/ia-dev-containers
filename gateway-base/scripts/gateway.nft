@@ -38,6 +38,14 @@ table inet gateway_egress {
         # RFC1918 (sauf retour déjà couvert par ct established,related ci-dessus).
         ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } drop
 
+        # Équivalents IPv6 des deux drops ci-dessus : la table est "inet"
+        # (IPv4 + IPv6), donc tcp dport { 80, 443 } matcherait aussi l'IPv6
+        # sans ces règles. fe80::/10 = link-local (équivalent 169.254.0.0/16) ;
+        # fd00::/8 = ULA (équivalent RFC1918), qui couvre au passage les
+        # métadonnées cloud IPv6 (ex. AWS fd00:ec2::254).
+        ip6 daddr fe80::/10 drop
+        ip6 daddr fd00::/8 drop
+
         tcp dport { 80, 443 } accept
     }
 }
