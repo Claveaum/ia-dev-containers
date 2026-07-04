@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -230,6 +231,47 @@ class MountsTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             orch.mounts(config)
+
+
+class CommandDispatchTests(unittest.TestCase):
+    # COMMANDS est la table utilisée par main() pour l'aiguillage — ce test
+    # échoue si une commande est ajoutée/retirée de USAGE sans être répercutée
+    # dans COMMANDS (ou l'inverse), ce que main() ne vérifiait pas avant que
+    # le dispatch ne devienne une table plutôt qu'une chaîne if/elif.
+    def test_commands_table_matches_documented_usage(self) -> None:
+        self.assertEqual(
+            set(orch.COMMANDS),
+            {"up", "shell", "test", "exec", "down", "purge", "logs", "secrets", "doctor"},
+        )
+
+    def test_unknown_command_has_no_handler(self) -> None:
+        self.assertNotIn("bogus", orch.COMMANDS)
+
+
+class HandleTestAggregationTests(unittest.TestCase):
+    # handle_test() doit faire échouer `run.sh test` si gateway-checks.sh
+    # échoue, pas seulement si security-tests.sh (via start_workspace)
+    # échoue — avant ce candidat, le code de sortie de gateway-checks.sh
+    # était silencieusement jeté (voir revue d'architecture, candidat A).
+    def setUp(self) -> None:
+        _clean_env(self)
+        self.config = _make_config()
+
+    def _run_with(self, gateway_rc: int, workspace_rc: int) -> int:
+        with unittest.mock.patch.object(orch, "_bring_up_gateway", return_value="10.89.0.2"), \
+             unittest.mock.patch.object(orch.subprocess, "run") as mock_run, \
+             unittest.mock.patch.object(orch, "start_workspace", return_value=workspace_rc):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=gateway_rc)
+            return orch.handle_test(self.config, [])
+
+    def test_gateway_failure_wins_over_workspace_success(self) -> None:
+        self.assertEqual(self._run_with(gateway_rc=1, workspace_rc=0), 1)
+
+    def test_workspace_failure_reported_when_gateway_ok(self) -> None:
+        self.assertEqual(self._run_with(gateway_rc=0, workspace_rc=1), 1)
+
+    def test_both_pass(self) -> None:
+        self.assertEqual(self._run_with(gateway_rc=0, workspace_rc=0), 0)
 
 
 def _client_config_from_lib_sh(lib_sh_path: Path, client_root: Path) -> orch.Config:
