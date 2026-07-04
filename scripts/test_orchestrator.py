@@ -67,7 +67,9 @@ class NameDerivationTests(unittest.TestCase):
         self.assertEqual(self.config.network_name, "ia-gw-internal-test-client-mon-projet")
 
     def test_cache_volume(self) -> None:
-        self.assertEqual(self.config.cache_volume, "test-client-cache")
+        # Scopé par projet (comme pkg_volume) : un CLI compromis dans un projet
+        # ne doit pas pouvoir empoisonner le cache pip/npm réutilisé par un autre.
+        self.assertEqual(self.config.cache_volume, "test-client-cache-mon-projet")
 
     def test_pkg_volume(self) -> None:
         # Vérifié équivalent aux noms historiques ("mistral-vibe-local-$PROJECT_NAME",
@@ -188,7 +190,7 @@ class MountsTests(unittest.TestCase):
             [
                 orch.Mount("/tmp/mon-projet/ia-dev-containers", "/workspace/ia-dev-containers", "bind", readonly=True),
                 orch.Mount("test-client-local-mon-projet", "/home/devuser/.local", "volume"),
-                orch.Mount("test-client-cache", "/home/devuser/.cache", "volume"),
+                orch.Mount("test-client-cache-mon-projet", "/home/devuser/.cache", "volume"),
             ],
         )
 
@@ -204,7 +206,7 @@ class MountsTests(unittest.TestCase):
                 orch.Mount("/tmp/mon-projet/ia-dev-containers", "/workspace/ia-dev-containers", "bind", readonly=True),
                 orch.Mount("test-client-local-mon-projet", "/home/devuser/.local", "volume"),
                 orch.Mount("test-client-copilot-mon-projet", "/home/devuser/.copilot", "volume"),
-                orch.Mount("test-client-cache", "/home/devuser/.cache", "volume"),
+                orch.Mount("test-client-cache-mon-projet", "/home/devuser/.cache", "volume"),
             ],
         )
 

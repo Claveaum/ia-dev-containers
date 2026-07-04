@@ -89,7 +89,7 @@ class Config:
         self.network_name = f"ia-gw-internal-{self.client_name}-{self.project_name}"
         self.gateway_container = f"{self.client_name}-{self.project_name}-gateway"
         self.workspace_container = f"{self.client_name}-{self.project_name}-workspace"
-        self.cache_volume = f"{self.client_name}-cache"
+        self.cache_volume = f"{self.client_name}-cache-{self.project_name}"
         self.pkg_volume = f"{self.client_name}-{_volume_suffix(self.pkg_volume_target)}-{self.project_name}"
 
 
