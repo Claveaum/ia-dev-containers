@@ -1,8 +1,7 @@
 #!/bin/bash
 # Adaptateur copilot : uniquement ce qui varie pour ce client. Le reste de
-# l'orchestration est générique — voir scripts/common.sh et
-# scripts/orchestrator.sh (partagés avec les autres clients), et
-# scripts/security-tests-common.sh côté vérifications.
+# l'orchestration est générique — voir scripts/orchestrator.py (partagé
+# avec les autres clients), et scripts/security-tests.sh côté vérifications.
 # Sourcé côté hôte (par run.sh) ET copié tel quel dans l'image workspace
 # (sourcé par security-tests.sh) : ne doit dépendre de rien d'autre que
 # bash — pas de `source` d'un autre fichier ici.
@@ -11,10 +10,11 @@
 CLIENT_NAME="copilot"
 
 # ~/.npm-global contient les VRAIS paquets installés par `npm install -g`
-# (pas un simple cache). Le nom du volume Podman (PKG_VOLUME) est dérivé de
-# ce chemin par scripts/common.sh — ne pas le déclarer ici.
+# (pas un simple cache). Le nom du volume Podman (config.pkg_volume) est
+# dérivé de ce chemin par Config.__post_init__ (scripts/orchestrator.py) —
+# ne pas le déclarer ici.
 PKG_VOLUME_TARGET="/home/devuser/.npm-global"
-# Libellé utilisé dans le message de security-tests-common.sh (section 2).
+# Libellé utilisé dans le message de security-tests.sh (section 2).
 PKG_INSTALL_LABEL="npm install -g"
 
 # @github/copilot écrit son état (session, jeton d'auth après /login,
@@ -24,8 +24,8 @@ PKG_INSTALL_LABEL="npm install -g"
 # silence dès le premier lancement (repéré dans ce sandbox : `copilot`
 # quitte avec exit 1 sans aucune sortie tant que ~/.copilot n'est pas
 # inscriptible). Simple chemin cible par entrée (le mount, côté CLI comme
-# côté devcontainer.json, est entièrement dérivé par scripts/common.sh et
-# devcontainer_mounts_json() dans scripts/orchestrator.sh — aucun jeton à
+# côté devcontainer.json, est entièrement dérivé par mounts() et
+# devcontainer_mounts_json() dans scripts/orchestrator.py — aucun jeton à
 # déclarer ici). Vide par défaut pour un client qui n'a pas ce besoin (ex.
 # mistral-vibe) ; un client peut en déclarer plusieurs.
 EXTRA_VOLUMES=(
@@ -35,12 +35,12 @@ EXTRA_VOLUMES=(
 # Nom affiché dans devcontainer.json ("name", et repris dans le message de
 # postStartCommand) — voir scripts/devcontainer-skeleton.json.template,
 # partagé par tous les clients (render_devcontainer() dans
-# scripts/orchestrator.sh).
+# scripts/orchestrator.py).
 DEVCONTAINER_DISPLAY_NAME="GitHub Copilot CLI"
 
 # Extensions VS Code proposées à l'ouverture de ce devcontainer (client
 # customizations.vscode.extensions, rendu en JSON par
-# devcontainer_extensions_json() dans scripts/orchestrator.sh).
+# devcontainer_extensions_json() dans scripts/orchestrator.py).
 DEVCONTAINER_EXTENSIONS=(
     "dbaeumer.vscode-eslint"
     "esbenp.prettier-vscode"
@@ -57,7 +57,7 @@ DEVCONTAINER_SETTINGS_JSON=""
 # workspace/Dockerfile).
 PKG_INSTALL_HINT="npm install -g @github/copilot"
 
-# Domaines vérifiés en section 3 de security-tests-common.sh :
+# Domaines vérifiés en section 3 de security-tests.sh :
 #   TEST_DOMAIN_PRIMARY   doit réussir, sinon échec dur (registre de paquets
 #                         de base de l'allowlist)
 #   TEST_DOMAIN_SECONDARY doit être joignable (code != 000), sinon
@@ -78,7 +78,7 @@ SECRETS=(
     "copilot-gh-token:GH_TOKEN"
 )
 
-# Callback appelé par scripts/security-tests-common.sh (section 4) —
+# Callback appelé par scripts/security-tests.sh (section 4) —
 # vérifications propres au gestionnaire de paquets de ce client. pass/fail/
 # warn sont définies par le script appelant, pas ici.
 client_package_manager_tests() {

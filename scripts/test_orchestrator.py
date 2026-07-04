@@ -71,7 +71,7 @@ class NameDerivationTests(unittest.TestCase):
 
     def test_pkg_volume(self) -> None:
         # Vérifié équivalent aux noms historiques ("mistral-vibe-local-$PROJECT_NAME",
-        # "copilot-npm-global-$PROJECT_NAME") lors de la fusion dans common.sh.
+        # "copilot-npm-global-$PROJECT_NAME"), dérivés par _volume_suffix().
         self.assertEqual(self.config.pkg_volume, "test-client-local-mon-projet")
 
     def test_project_name_override_via_env(self) -> None:
