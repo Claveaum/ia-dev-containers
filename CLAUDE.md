@@ -17,7 +17,7 @@ gateway-base/                     # image générique gateway (Squid, nftables)
   scripts/gateway-checks.sh       # vérifications côté gateway, génériques (podman exec ... /gateway-checks.sh)
 workspace-base/        # image générique workspace (CLI IA)
 scripts/                          # orchestrateur générique, partagé par tous les clients
-  common.sh                       # gabarits de noms + auto-protection + _collect_arg_lines() (côté hôte)
+  common.sh                       # gabarits de noms, EXTRA_VOLUMES, contrat de sécurité (WORKSPACE_SECURITY_ARGS), proxy_url, préflight plateforme, _collect_arg_lines(), allocation réseau, auto-protection (côté hôte)
   common-tests.sh                 # tests rapides sans Podman de common.sh
   orchestrator.sh                 # up|shell|test|down|secrets|doctor — orchestrator_main() ; aussi render_devcontainer() + ses helpers JSON (seul appelant)
   security-tests.sh               # batterie de tests générique (copiée dans l'image workspace, source /lib.sh)
