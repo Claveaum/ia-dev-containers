@@ -73,7 +73,7 @@ COPY scripts/prepare-state-dir.sh /prepare-state-dir.sh
 RUN chmod +x /prepare-state-dir.sh
 
 # Seul .cache est réellement générique (CACHE_VOLUME, monté sans condition
-# pour tout client — voir scripts/common.sh: start_workspace()). .local et
+# pour tout client — voir scripts/orchestrator.py: mounts()). .local et
 # .npm-global sont chacun le PKG_VOLUME_TARGET d'UN SEUL client (mistral-vibe,
 # copilot) : les préparer ici les ferait passer pour génériques alors qu'ils
 # ne le sont pas — chaque overlay client prépare désormais son propre
@@ -97,8 +97,7 @@ ENV IA_CLIENT=unknown
 # Une ENV figée ici casserait tout `apt-get install`/`pip install` ultérieur
 # au build (apt respecte HTTP_PROXY et tenterait de résoudre un hôte
 # "gateway" qui n'existe pas encore). Le proxy est injecté uniquement au
-# runtime par scripts/orchestrator.sh: start_workspace() (proxy_url() dans
-# scripts/common.sh).
+# runtime par scripts/orchestrator.py: start_workspace() (proxy_url()).
 ENV NO_PROXY=localhost,127.0.0.1
 
 # Certains outils ignorent le magasin système par défaut (CA vendorisée) :

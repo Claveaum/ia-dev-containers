@@ -1,8 +1,7 @@
 #!/bin/bash
 # Adaptateur mistral-vibe : uniquement ce qui varie pour ce client. Le reste
-# de l'orchestration est générique — voir scripts/common.sh et
-# scripts/orchestrator.sh (partagés avec les autres clients), et
-# scripts/security-tests-common.sh côté vérifications.
+# de l'orchestration est générique — voir scripts/orchestrator.py (partagé
+# avec les autres clients), et scripts/security-tests.sh côté vérifications.
 # Sourcé côté hôte (par run.sh) ET copié tel quel dans l'image workspace
 # (sourcé par security-tests.sh) : ne doit dépendre de rien d'autre que
 # bash — pas de `source` d'un autre fichier ici.
@@ -11,21 +10,22 @@
 CLIENT_NAME="mistral-vibe"
 
 # ~/.local contient les VRAIS paquets installés par `pip install --user`
-# (pas un simple cache). Le nom du volume Podman (PKG_VOLUME) est dérivé de
-# ce chemin par scripts/common.sh — ne pas le déclarer ici.
+# (pas un simple cache). Le nom du volume Podman (config.pkg_volume) est
+# dérivé de ce chemin par Config.__post_init__ (scripts/orchestrator.py) —
+# ne pas le déclarer ici.
 PKG_VOLUME_TARGET="/home/devuser/.local"
-# Libellé utilisé dans le message de security-tests-common.sh (section 2).
+# Libellé utilisé dans le message de security-tests.sh (section 2).
 PKG_INSTALL_LABEL="pip"
 
 # Nom affiché dans devcontainer.json ("name", et repris dans le message de
 # postStartCommand) — voir scripts/devcontainer-skeleton.json.template,
 # partagé par tous les clients (render_devcontainer() dans
-# scripts/orchestrator.sh).
+# scripts/orchestrator.py).
 DEVCONTAINER_DISPLAY_NAME="Mistral Vibe CLI"
 
 # Extensions VS Code proposées à l'ouverture de ce devcontainer (client
 # customizations.vscode.extensions, rendu en JSON par
-# devcontainer_extensions_json() dans scripts/orchestrator.sh).
+# devcontainer_extensions_json() dans scripts/orchestrator.py).
 DEVCONTAINER_EXTENSIONS=(
     "ms-python.python"
     "ms-python.vscode-pylance"
@@ -53,7 +53,7 @@ DEVCONTAINER_SETTINGS_JSON='        "python.pythonPath": "/home/devuser/.local/b
 # workspace/Dockerfile).
 PKG_INSTALL_HINT="pip install --user mistral-vibe"
 
-# Domaines vérifiés en section 3 de security-tests-common.sh :
+# Domaines vérifiés en section 3 de security-tests.sh :
 #   TEST_DOMAIN_PRIMARY   doit réussir, sinon échec dur (registre de paquets
 #                         de base de l'allowlist)
 #   TEST_DOMAIN_SECONDARY doit être joignable (code != 000), sinon
@@ -70,7 +70,7 @@ SECRETS=(
     "mistral-vibe-mistral-api-key:MISTRAL_API_KEY"
 )
 
-# Callback appelé par scripts/security-tests-common.sh (section 4) —
+# Callback appelé par scripts/security-tests.sh (section 4) —
 # vérifications propres au gestionnaire de paquets de ce client. pass/fail/
 # warn sont définies par le script appelant, pas ici.
 client_package_manager_tests() {

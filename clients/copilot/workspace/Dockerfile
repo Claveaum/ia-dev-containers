@@ -34,7 +34,7 @@ ENV PATH="/home/devuser/.npm-global/bin:${PATH}"
 ENV NPM_CONFIG_CACHE=/home/devuser/.cache/npm
 
 # Contexte de build = racine du dépôt (voir build_images() dans
-# scripts/orchestrator.sh), pas clients/copilot/ : security-tests.sh est
+# scripts/orchestrator.py), pas clients/copilot/ : security-tests.sh est
 # partagé entre clients et vit hors de ce dossier.
 COPY --chmod=0755 scripts/security-tests.sh /security-tests.sh
 COPY clients/copilot/scripts/lib.sh /lib.sh

@@ -94,8 +94,6 @@ class Config:
 
 
 # --- Auto-protection de ia-dev-containers/ contre l'écriture depuis le workspace ---
-# Voir scripts/common.sh (version bash, encore présente le temps de la
-# migration) pour le détail du raisonnement ; comportement inchangé ici.
 def self_protect_relpath(config: Config) -> str:
     if os.environ.get("IA_SELF_MOUNT_RW", "0") == "1":
         return ""
