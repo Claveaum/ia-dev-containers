@@ -84,9 +84,17 @@ __WORKSPACE_SECURITY_ARGS__
     // (scripts/orchestrator.py), même valeur que start_workspace() — respecte
     // GATEWAY_ADDR_MODE=static comme le chemin CLI, pas juste l'alias DNS
     // "gateway". Placeholder substitué par render_devcontainer().
+    // registry_runargs_json() (scripts/orchestrator.py) ajoute REGISTRY_URL/
+    // REGISTRY_USER juste après IA_CLIENT ci-dessous si un registre
+    // d'entreprise est configuré (lib.sh) — vide sinon (JSON inchangé).
+    // Limite connue, sans effet pratique ici : le CLI devcontainer écrase la
+    // commande/le point d'entrée de l'image par défaut (`overrideCommand`),
+    // donc entrypoint.sh (et le callback client_configure_registry() qui y
+    // lirait ces variables) ne s'exécute pas du tout dans ce chemin — voir
+    // docs/enterprise-registry.md pour le détail et l'alternative (CLI).
     "-e=HTTP_PROXY=__PROXY_URL__",
     "-e=HTTPS_PROXY=__PROXY_URL__",
-    "-e=IA_CLIENT=__CLIENT_NAME__"
+    "-e=IA_CLIENT=__CLIENT_NAME__"__REGISTRY_RUNARGS__
   ],
 
   "postCreateCommand": "/security-tests.sh || echo '⚠️  Des tests ont échoué - vérifiez que ./scripts/run.sh up a bien été lancé AVANT d'\\''ouvrir ce dossier (le gateway doit déjà tourner).'",

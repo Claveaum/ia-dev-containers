@@ -111,6 +111,8 @@ Table complète des mesures, limites connues (ex. allowlist qui réduit l'exfilt
 
 Ajouter un nouveau client IA ne demande d'écrire que ce qui varie réellement (allowlist, Dockerfile, `lib.sh`) — toute l'orchestration (build, mounts, devcontainer, tests) est générique et partagée. Marche à suivre complète : [docs/adding-a-client.md](docs/adding-a-client.md).
 
+Registre de paquets d'entreprise (pip/npm) authentifié à la place du registre public par défaut : [docs/enterprise-registry.md](docs/enterprise-registry.md).
+
 ---
 
 ## 🔧 Dépannage
@@ -135,6 +137,7 @@ Workspace qui ne démarre pas, gateway injoignable, domaine bloqué, bug Podman/
 - **[docs/architecture.md](docs/architecture.md)** — architecture détaillée, bind-mount, auto-protection, structure du projet, isolation entre projets
 - **[docs/security.md](docs/security.md)** — mesures de sécurité complètes, limites connues, bonnes pratiques
 - **[docs/adding-a-client.md](docs/adding-a-client.md)** — ajouter un nouveau client IA
+- **[docs/enterprise-registry.md](docs/enterprise-registry.md)** — configurer un registre pip/npm d'entreprise authentifié
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** — dépannage et mise à jour d'une copie déployée
 - **[docs/macos.md](docs/macos.md)** / **[docs/windows.md](docs/windows.md)** — guides plateforme (expérimentaux)
 

@@ -44,6 +44,8 @@ args=(
     --devcontainer-display-name "$DEVCONTAINER_DISPLAY_NAME"
     --devcontainer-settings-json "$DEVCONTAINER_SETTINGS_JSON"
     --pkg-install-hint "$PKG_INSTALL_HINT"
+    --registry-url "$REGISTRY_URL"
+    --registry-user "$REGISTRY_USER"
 )
 for ext in "${DEVCONTAINER_EXTENSIONS[@]+"${DEVCONTAINER_EXTENSIONS[@]}"}"; do
     args+=(--extension "$ext")
@@ -53,6 +55,9 @@ for vol in "${EXTRA_VOLUMES[@]+"${EXTRA_VOLUMES[@]}"}"; do
 done
 for secret in "${SECRETS[@]+"${SECRETS[@]}"}"; do
     args+=(--secret "$secret")
+done
+for kv in "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}"; do
+    args+=(--extra-env "$kv")
 done
 
 exec python3 "$REPO_ROOT/scripts/orchestrator.py" "${args[@]}" -- "$@"

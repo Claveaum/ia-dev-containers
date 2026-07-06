@@ -68,7 +68,67 @@ TEST_DOMAIN_SECONDARY="api.mistral.ai"
 # Création : printf '%s' 'sk-...' | podman secret create mistral-vibe-mistral-api-key -
 SECRETS=(
     "mistral-vibe-mistral-api-key:MISTRAL_API_KEY"
+
+    # Registre pip d'entreprise (optionnel) : décommenter si REGISTRY_URL
+    # ci-dessous est défini. Création :
+    # printf '%s' 'token...' | podman secret create mistral-vibe-registry-token -
+    # "mistral-vibe-registry-token:REGISTRY_TOKEN"
 )
+
+# Registre pip d'entreprise (optionnel, vide par défaut = PyPI public
+# inchangé). Si défini, REMPLACE l'index pip par défaut (voir
+# client_configure_registry() ci-dessous) — pensez à aussi ajouter le domaine
+# à gateway/config/allowed-urls.txt (et à ajuster TEST_DOMAIN_PRIMARY plus
+# haut si pypi.org n'est alors plus joignable) puis à reconstruire. Le jeton
+# associé est un secret (voir REGISTRY_TOKEN dans SECRETS ci-dessus), jamais
+# cette variable. Détail : docs/enterprise-registry.md.
+REGISTRY_URL=""
+# Identifiant netrc associé (optionnel) — beaucoup de registres pip
+# d'entreprise acceptent un identifiant arbitraire type "token" avec le vrai
+# secret en mot de passe ; ne renseigner que si votre registre exige un
+# identifiant précis.
+REGISTRY_USER=""
+
+# Chemins déterministes des fichiers écrits par client_configure_registry()
+# ci-dessous — calculés ici (pas seulement par un `export` dans le callback)
+# pour rester posés via `podman run -e` (voir EXTRA_ENV, run.sh, et
+# scripts/orchestrator.py: extra_env_args()) et donc visibles aussi depuis
+# `run.sh exec` (second shell dans le même workspace) : un `podman exec`
+# hérite de l'environnement du conteneur figé à sa création, pas des
+# `export` faits ensuite par entrypoint.sh (process PID 1).
+REGISTRY_PIP_CONF="${PKG_VOLUME_TARGET}/pip.conf"
+REGISTRY_NETRC="${PKG_VOLUME_TARGET}/.netrc"
+EXTRA_ENV=()
+if [ -n "$REGISTRY_URL" ]; then
+    EXTRA_ENV+=(
+        "PIP_CONFIG_FILE=${REGISTRY_PIP_CONF}"
+        "NETRC=${REGISTRY_NETRC}"
+    )
+fi
+
+# Callback appelé par workspace-base/scripts/entrypoint.sh au démarrage du
+# conteneur, uniquement si REGISTRY_URL est défini — écrit la config pip
+# (index-url + identifiants) à partir de REGISTRY_URL/REGISTRY_USER/
+# REGISTRY_TOKEN (ce dernier injecté en variable d'environnement par
+# scripts/orchestrator.py, depuis SECRETS ci-dessus). $HOME lui-même est en
+# lecture seule (--read-only) : tout fichier généré doit vivre sous
+# PKG_VOLUME_TARGET (~/.local), seul chemin inscriptible ici. PIP_CONFIG_FILE/
+# NETRC sont déjà dans l'environnement (posés par EXTRA_ENV ci-dessus au
+# `podman run`) : ce callback n'a qu'à écrire les fichiers, pas à les
+# exporter.
+client_configure_registry() {
+    local token="${REGISTRY_TOKEN:?REGISTRY_URL défini mais REGISTRY_TOKEN absent (voir SECRETS ci-dessus)}"
+    local user="${REGISTRY_USER:-token}"
+    local host="${REGISTRY_URL#*://}"
+    host="${host%%/*}"
+    host="${host%%:*}"
+
+    printf 'machine %s\nlogin %s\npassword %s\n' "$host" "$user" "$token" \
+        > "${REGISTRY_NETRC}"
+    chmod 600 "${REGISTRY_NETRC}"
+
+    printf '[global]\nindex-url = %s\n' "$REGISTRY_URL" > "${REGISTRY_PIP_CONF}"
+}
 
 # Callback appelé par scripts/security-tests.sh (section 4) —
 # vérifications propres au gestionnaire de paquets de ce client. pass/fail/

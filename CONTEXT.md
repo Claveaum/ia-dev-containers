@@ -31,3 +31,11 @@ où ils vivent dans le code.
 - **adaptateur client** — `clients/<nom>/scripts/lib.sh` : données propres à
   un client IA (nom, volume de paquets, extensions VS Code, secrets
   attendus), jamais de logique d'orchestration générique.
+- **registre d'entreprise** — registre de paquets privé authentifié
+  (`REGISTRY_URL`/`REGISTRY_USER` dans `lib.sh` + jeton via `SECRETS`) qui
+  remplace le registre public par défaut (PyPI/npmjs) d'un client. Écrit sur
+  disque au démarrage du workspace par le callback client
+  `client_configure_registry()` (même pattern que
+  `client_package_manager_tests()`, mais appelé par
+  `workspace-base/scripts/entrypoint.sh`) — voir
+  [docs/enterprise-registry.md](docs/enterprise-registry.md).

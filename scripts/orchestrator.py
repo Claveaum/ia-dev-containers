@@ -92,6 +92,9 @@ class Config:
     extensions: list[str]
     extra_volumes: list[str]
     secrets: list[str]  # chaque entrée : "nom-du-secret:VARIABLE_ENV"
+    registry_url: str  # URL du registre d'entreprise (pip/npm) ; vide = registre public inchangé
+    registry_user: str  # identifiant non secret associé (optionnel, ex. netrc pip)
+    extra_env: list[str]  # chaque entrée : "VARIABLE=valeur", posées au démarrage du conteneur (podman run -e)
 
     def __post_init__(self) -> None:
         env_project_name = os.environ.get("IA_PROJECT_NAME")
@@ -299,6 +302,22 @@ def devcontainer_extensions_json(config: Config) -> str:
     return _json_array_block(lines, trailing_comma_on_last=False)
 
 
+# Fragment optionnel inséré juste après "-e=IA_CLIENT=..." dans le runArgs du
+# squelette : vide (donc JSON inchangé) si REGISTRY_URL n'est pas défini, pour
+# ne rien changer au rendu des clients qui n'utilisent pas cette
+# fonctionnalité. Même donnée que registry_env_args() (chemin CLI) — pas de
+# podman secret possible ici (devcontainer.json ne le supporte pas), donc
+# REGISTRY_TOKEN n'est volontairement pas rendu côté VS Code (voir docs).
+def registry_runargs_json(config: Config) -> str:
+    if not config.registry_url:
+        return ""
+    entries = [f"-e=REGISTRY_URL={config.registry_url}"]
+    if config.registry_user:
+        entries.append(f"-e=REGISTRY_USER={config.registry_user}")
+    lines = [f'    "{_json_fragment(e)}"' for e in entries]
+    return ",\n" + ",\n".join(lines)
+
+
 def render_devcontainer(config: Config, gateway_ip: str | None) -> None:
     template_path = config.repo_root / "scripts" / "devcontainer-skeleton.json.template"
     out_path = config.client_root / ".devcontainer" / "devcontainer.json"
@@ -321,6 +340,7 @@ def render_devcontainer(config: Config, gateway_ip: str | None) -> None:
         # valide, virgule finale incluse) : insertion verbatim, pas
         # d'échappement JSON (qui casserait les guillemets/deux-points).
         "__DEVCONTAINER_SETTINGS__": config.devcontainer_settings_json,
+        "__REGISTRY_RUNARGS__": registry_runargs_json(config),
     }
     for token, value in replacements.items():
         template = template.replace(token, value)
@@ -493,6 +513,38 @@ def list_secrets(config: Config) -> None:
             print(f"  {var_name} : ❌ absent — printf '%s' 'valeur' | podman secret create {secret_name} -")
 
 
+def extra_env_args(config: Config) -> list[str]:
+    # Généralise le passage d'une variable d'environnement KEY=VALUE connue
+    # côté hôte (lib.sh) au moment de `podman run` (pas seulement au moment
+    # où entrypoint.sh s'exécute) : contrairement à un `export` fait par un
+    # callback dans entrypoint.sh (process PID 1 du conteneur), une variable
+    # posée ici fait partie de la spec du conteneur et reste donc visible
+    # depuis un `podman exec` ultérieur (second shell, voir handle_exec()),
+    # qui hérite de l'environnement du conteneur à sa création, pas des
+    # mutations faites depuis par PID 1. Utilisé par exemple par
+    # client_configure_registry() (PIP_CONFIG_FILE/NETRC/NPM_CONFIG_USERCONFIG,
+    # voir clients/*/scripts/lib.sh: EXTRA_ENV).
+    args: list[str] = []
+    for entry in config.extra_env:
+        args += ["-e", entry]
+    return args
+
+
+def registry_env_args(config: Config) -> list[str]:
+    # Donnée non secrète (URL/identifiant) : simple -e, contrairement au jeton
+    # associé (voir SECRETS/secret_args()) qui reste porté par podman secret.
+    # Omis entièrement si REGISTRY_URL est vide, pour ne rien changer au
+    # comportement par défaut (registre public inchangé) ni ajouter de bruit
+    # dans la commande podman run pour les clients qui n'utilisent pas cette
+    # fonctionnalité.
+    if not config.registry_url:
+        return []
+    args = ["-e", f"REGISTRY_URL={config.registry_url}"]
+    if config.registry_user:
+        args += ["-e", f"REGISTRY_USER={config.registry_user}"]
+    return args
+
+
 def start_workspace(config: Config, gateway_ip: str, extra_args: list[str]) -> int:
     proxy = proxy_url(config, gateway_ip)
     env_file = config.client_root / ".env"
@@ -519,6 +571,8 @@ def start_workspace(config: Config, gateway_ip: str, extra_args: list[str]) -> i
         *cli_mount_args,
         "-e", f"HTTP_PROXY={proxy}", "-e", f"HTTPS_PROXY={proxy}",
         "-e", f"IA_CLIENT={config.client_name}",
+        *registry_env_args(config),
+        *extra_env_args(config),
         *secret_args(config),
         *env_args,
         config.workspace_image,
@@ -562,6 +616,9 @@ def parse_own_args(argv: list[str]) -> Config:
     parser.add_argument("--extension", action="append", default=[], dest="extensions")
     parser.add_argument("--extra-volume", action="append", default=[], dest="extra_volumes")
     parser.add_argument("--secret", action="append", default=[], dest="secrets")
+    parser.add_argument("--registry-url", default="")
+    parser.add_argument("--registry-user", default="")
+    parser.add_argument("--extra-env", action="append", default=[], dest="extra_env")
     parsed = parser.parse_args(argv)
     return Config(
         client_name=parsed.client_name,
@@ -575,6 +632,9 @@ def parse_own_args(argv: list[str]) -> Config:
         extensions=parsed.extensions,
         extra_volumes=parsed.extra_volumes,
         secrets=parsed.secrets,
+        registry_url=parsed.registry_url,
+        registry_user=parsed.registry_user,
+        extra_env=parsed.extra_env,
     )
 
 

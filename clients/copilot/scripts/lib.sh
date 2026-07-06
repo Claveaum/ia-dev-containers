@@ -76,7 +76,63 @@ TEST_DOMAIN_SECONDARY="api.githubcopilot.com"
 # Création : printf '%s' 'ghp_...' | podman secret create copilot-gh-token -
 SECRETS=(
     "copilot-gh-token:GH_TOKEN"
+
+    # Registre npm d'entreprise (optionnel) : décommenter si REGISTRY_URL
+    # ci-dessous est défini. Création :
+    # printf '%s' 'token...' | podman secret create copilot-registry-token -
+    # "copilot-registry-token:REGISTRY_TOKEN"
 )
+
+# Registre npm d'entreprise (optionnel, vide par défaut = npmjs public
+# inchangé). Si défini, REMPLACE le registre npm par défaut (voir
+# client_configure_registry() ci-dessous) — pensez à aussi ajouter le domaine
+# à gateway/config/allowed-urls.txt (et à ajuster TEST_DOMAIN_PRIMARY plus
+# haut si registry.npmjs.org n'est alors plus joignable) puis à reconstruire.
+# Le jeton associé est un secret (voir REGISTRY_TOKEN dans SECRETS
+# ci-dessus), jamais cette variable. Détail : docs/enterprise-registry.md.
+REGISTRY_URL=""
+# Non utilisé par npm (authentification par jeton seul, voir
+# client_configure_registry() ci-dessous) — présent uniquement pour la
+# symétrie avec les autres clients (ex. mistral-vibe/pip, où un identifiant a
+# un sens pour netrc).
+REGISTRY_USER=""
+
+# Chemin déterministe du fichier écrit par client_configure_registry()
+# ci-dessous — calculé ici (pas seulement par un `export` dans le callback)
+# pour rester posé via `podman run -e` (voir EXTRA_ENV, run.sh, et
+# scripts/orchestrator.py: extra_env_args()) et donc visible aussi depuis
+# `run.sh exec` (second shell dans le même workspace) : un `podman exec`
+# hérite de l'environnement du conteneur figé à sa création, pas des
+# `export` faits ensuite par entrypoint.sh (process PID 1). REGISTRY_TOKEN
+# n'a pas besoin du même traitement : il est déjà posé au démarrage par
+# `podman secret` (voir secret_args() dans scripts/orchestrator.py), donc
+# déjà hérité par un `podman exec`.
+REGISTRY_NPMRC="${PKG_VOLUME_TARGET}/.npmrc"
+EXTRA_ENV=()
+if [ -n "$REGISTRY_URL" ]; then
+    EXTRA_ENV+=("NPM_CONFIG_USERCONFIG=${REGISTRY_NPMRC}")
+fi
+
+# Callback appelé par workspace-base/scripts/entrypoint.sh au démarrage du
+# conteneur, uniquement si REGISTRY_URL est défini — écrit la config npm
+# (registry + jeton) à partir de REGISTRY_URL/REGISTRY_TOKEN (ce dernier
+# injecté en variable d'environnement par scripts/orchestrator.py, depuis
+# SECRETS ci-dessus). $HOME lui-même est en lecture seule (--read-only) :
+# tout fichier généré doit vivre sous PKG_VOLUME_TARGET (~/.npm-global), seul
+# chemin inscriptible ici. Le jeton est écrit en tant que référence
+# littérale ${REGISTRY_TOKEN} : npm l'interpole lui-même depuis
+# l'environnement à la lecture de .npmrc, il ne touche donc jamais le disque.
+client_configure_registry() {
+    : "${REGISTRY_TOKEN:?REGISTRY_URL défini mais REGISTRY_TOKEN absent (voir SECRETS ci-dessus)}"
+    local registry_key="${REGISTRY_URL#*://}"
+    registry_key="${registry_key%/}"
+
+    {
+        printf 'registry=%s\n' "$REGISTRY_URL"
+        printf '//%s/:_authToken=${REGISTRY_TOKEN}\n' "$registry_key"
+    } > "${REGISTRY_NPMRC}"
+    chmod 600 "${REGISTRY_NPMRC}"
+}
 
 # Callback appelé par scripts/security-tests.sh (section 4) —
 # vérifications propres au gestionnaire de paquets de ce client. pass/fail/

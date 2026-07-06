@@ -47,6 +47,9 @@ def _make_config(**overrides) -> orch.Config:
         extensions=[],
         extra_volumes=[],
         secrets=[],
+        registry_url="",
+        registry_user="",
+        extra_env=[],
     )
     defaults.update(overrides)
     return orch.Config(**defaults)
@@ -118,6 +121,55 @@ class ProxyUrlTests(unittest.TestCase):
         os.environ["GATEWAY_ADDR_MODE"] = "static"
         config = _make_config()
         self.assertEqual(orch.proxy_url(config, gateway_ip="10.89.42.2"), "http://10.89.42.2:3128")
+
+
+class RegistryEnvArgsTests(unittest.TestCase):
+    # registry_env_args() (chemin CLI) et registry_runargs_json() (chemin
+    # VS Code) doivent tous deux rester des no-op silencieux tant que
+    # REGISTRY_URL est vide (comportement par défaut inchangé pour les
+    # clients qui n'utilisent pas cette fonctionnalité).
+    def test_empty_when_no_registry_url(self) -> None:
+        config = _make_config()
+        self.assertEqual(orch.registry_env_args(config), [])
+        self.assertEqual(orch.registry_runargs_json(config), "")
+
+    def test_url_only(self) -> None:
+        config = _make_config(registry_url="https://npm.mycorp.com/")
+        self.assertEqual(
+            orch.registry_env_args(config),
+            ["-e", "REGISTRY_URL=https://npm.mycorp.com/"],
+        )
+        self.assertEqual(
+            orch.registry_runargs_json(config),
+            ',\n    "-e=REGISTRY_URL=https://npm.mycorp.com/"',
+        )
+
+    def test_url_and_user(self) -> None:
+        config = _make_config(registry_url="https://pip.mycorp.com/simple/", registry_user="svc-account")
+        self.assertEqual(
+            orch.registry_env_args(config),
+            ["-e", "REGISTRY_URL=https://pip.mycorp.com/simple/", "-e", "REGISTRY_USER=svc-account"],
+        )
+        self.assertEqual(
+            orch.registry_runargs_json(config),
+            ',\n    "-e=REGISTRY_URL=https://pip.mycorp.com/simple/",\n    "-e=REGISTRY_USER=svc-account"',
+        )
+
+
+class ExtraEnvArgsTests(unittest.TestCase):
+    # extra_env_args() est ce qui rend PIP_CONFIG_FILE/NETRC/NPM_CONFIG_USERCONFIG
+    # visibles depuis `run.sh exec` (podman exec hérite de l'environnement du
+    # conteneur à sa création, pas des `export` faits ensuite par PID 1) —
+    # voir clients/*/scripts/lib.sh: EXTRA_ENV.
+    def test_empty_by_default(self) -> None:
+        self.assertEqual(orch.extra_env_args(_make_config()), [])
+
+    def test_each_entry_becomes_its_own_dash_e(self) -> None:
+        config = _make_config(extra_env=["PIP_CONFIG_FILE=/home/devuser/.local/pip.conf", "NETRC=/home/devuser/.local/.netrc"])
+        self.assertEqual(
+            orch.extra_env_args(config),
+            ["-e", "PIP_CONFIG_FILE=/home/devuser/.local/pip.conf", "-e", "NETRC=/home/devuser/.local/.netrc"],
+        )
 
 
 class WorkspaceSecurityArgsTests(unittest.TestCase):
@@ -290,6 +342,8 @@ args+=(--pkg-volume-target "$PKG_VOLUME_TARGET")
 args+=(--devcontainer-display-name "$DEVCONTAINER_DISPLAY_NAME")
 args+=(--devcontainer-settings-json "$DEVCONTAINER_SETTINGS_JSON")
 args+=(--pkg-install-hint "$PKG_INSTALL_HINT")
+args+=(--registry-url "$REGISTRY_URL")
+args+=(--registry-user "$REGISTRY_USER")
 for ext in "${{DEVCONTAINER_EXTENSIONS[@]+"${{DEVCONTAINER_EXTENSIONS[@]}}"}}"; do
     args+=(--extension "$ext")
 done
@@ -298,6 +352,9 @@ for vol in "${{EXTRA_VOLUMES[@]+"${{EXTRA_VOLUMES[@]}}"}}"; do
 done
 for secret in "${{SECRETS[@]+"${{SECRETS[@]}}"}}"; do
     args+=(--secret "$secret")
+done
+for kv in "${{EXTRA_ENV[@]+"${{EXTRA_ENV[@]}}"}}"; do
+    args+=(--extra-env "$kv")
 done
 printf '%s\\0' "${{args[@]}}"
 '''
@@ -355,6 +412,29 @@ class RenderDevcontainerRealClientsTests(unittest.TestCase):
                         json.loads(stripped)
                     except json.JSONDecodeError as exc:
                         self.fail(f"JSON(C) invalide pour {client_dir.name} : {exc}")
+
+    def test_registry_url_set_still_renders_valid_json(self) -> None:
+        # Piège vécu : template.replace() est un remplacement littéral de
+        # TOUTES les occurrences du jeton — un jeton mentionné tel quel dans
+        # un commentaire du squelette (ex. "__REGISTRY_RUNARGS__ ajoute...")
+        # se fait aussi substituer, corrompant le JSON. Seul un REGISTRY_URL
+        # non vide déclenche une insertion réelle dans runArgs : le rendu par
+        # défaut (REGISTRY_URL="") ne l'aurait pas détecté.
+        with tempfile.TemporaryDirectory() as tmp:
+            client_root = Path(tmp)
+            config = _make_config(
+                client_root=client_root,
+                repo_root=REPO_ROOT,
+                project_root=REPO_ROOT.parent,
+                registry_url="https://pip.mycorp.com/simple/",
+                registry_user="svc-account",
+            )
+            orch.render_devcontainer(config, gateway_ip=None)
+            raw = (client_root / ".devcontainer" / "devcontainer.json").read_text(encoding="utf-8")
+            stripped = _strip_jsonc_comments(raw)
+            json.loads(stripped)  # lève JSONDecodeError si corrompu
+            self.assertIn('"-e=REGISTRY_URL=https://pip.mycorp.com/simple/"', raw)
+            self.assertIn('"-e=REGISTRY_USER=svc-account"', raw)
 
 
 class MainHelpAndDispatchTests(unittest.TestCase):
