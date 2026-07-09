@@ -64,6 +64,33 @@ puis `podman machine stop && podman machine start`.
 
 **Cas non couvert** : si le réseau exige en plus un **proxy HTTP(S) explicite obligatoire** pour toute sortie (le gateway ne peut pas joindre internet directement, même avec la CA en place), il faudrait chaîner Squid vers ce proxy amont (`cache_peer` dans `gateway-base/config/squid.conf`) — non implémenté ici, à traiter séparément si besoin confirmé.
 
+---
+
+## Domaine interne d'entreprise résolu différemment depuis le workspace (DNS split-horizon)
+
+**Symptôme** : une requête vers un domaine d'entreprise (ex. un registre npm/pip interne) réussit depuis l'hôte (Mac/PC), mais échoue systématiquement depuis le workspace — typiquement un `404` uniforme même avec des identifiants corrects et vérifiés (Nexus et d'autres registres masquent souvent un refus réseau/auth en `404` plutôt qu'en `401`/`403`, pour ne pas révéler l'existence de la ressource).
+
+**Cause** : `gateway-base/config/squid.conf` résout les domaines externes via des résolveurs DNS publics codés en dur (`dns_nameservers 1.1.1.1 9.9.9.9`), volontairement indépendants du résolveur interne `aardvark-dns` (qui ne connaît que les noms de conteneurs du réseau `--internal` du projet, `NXDOMAIN` pour tout le reste). Si le domaine visé n'existe que dans une zone DNS **interne** d'entreprise (résolue en interne vers une adresse privée, ex. `nexus.mycorp.io` → CNAME `nexus.internal.mycorp.io` → `10.x.x.x`), les résolveurs publics ne la voient jamais — soit `NXDOMAIN`, soit (si le domaine a aussi un enregistrement public distinct) une résolution vers un tout autre service, avec un contenu/des permissions différents.
+
+**Diagnostic** : comparer la résolution DNS du domaine concerné entre l'hôte et le gateway :
+```bash
+# Sur l'hôte (Mac/PC)
+nslookup <domaine>
+
+# Depuis le gateway (nom de conteneur scopé par projet, voir `run.sh doctor`)
+podman exec "$(podman ps --format '{{.Names}}' | grep -E '^<client>-.*-gateway$')" nslookup <domaine>
+```
+Des adresses IP différentes (ou `NXDOMAIN` côté gateway) confirment le split-horizon.
+
+**Résolution** : pointer Squid vers le(s) résolveur(s) DNS interne(s) de l'entreprise via `GATEWAY_DNS_SERVERS` (variable d'environnement générique, lue directement par `scripts/orchestrator.py` — voir le tableau des variables d'environnement dans le README du client) :
+```bash
+GATEWAY_DNS_SERVERS="<ip-dns-interne> [ip-dns-secondaire]" ./scripts/run.sh down
+GATEWAY_DNS_SERVERS="<ip-dns-interne> [ip-dns-secondaire]" ./scripts/run.sh up
+```
+Cette variable n'a d'effet qu'au démarrage du gateway (`entrypoint.sh` régénère `dns_nameservers` sous `/tmp/squid.conf`, seul chemin inscriptible du conteneur en lecture seule) — un `down && up` est nécessaire après tout changement.
+
+**Limite** : ce résolveur interne doit lui-même être **joignable depuis la VM `podman machine`** (macOS/Windows) ou l'hôte (Linux natif) — s'il n'est accessible que via un VPN, vérifiez que le VPN route bien le trafic de cette VM (voir [docs/macos.md](macos.md)/[docs/windows.md](windows.md)), pas seulement les interfaces réseau natives de l'hôte.
+
 **Registre privé/auto-signé** (non applicable aujourd'hui — le projet ne pull que depuis Docker Hub public) : Podman a son propre mécanisme, indépendant de ce qui précède — `/etc/containers/certs.d/<host[:port]>/ca.crt` (rootful) ou `~/.config/containers/certs.d/<host[:port]>/ca.crt` (rootless).
 
 ---

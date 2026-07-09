@@ -37,6 +37,12 @@
 # traverser la frontière CLI) :
 #   GATEWAY_HARDENED=1     active la Phase 2 (nftables + abandon de privilèges)
 #   GATEWAY_ADDR_MODE=static  utilise l'IP fixe du gateway au lieu de la résolution DNS
+#   GATEWAY_DNS_SERVERS="ip1 ip2"  résolveurs DNS que Squid utilise pour les
+#                           domaines externes (défaut : 1.1.1.1 9.9.9.9, voir
+#                           gateway-base/config/squid.conf). À renseigner si un
+#                           domaine de l'allowlist n'existe que dans une zone
+#                           DNS interne d'entreprise (split-horizon), invisible
+#                           depuis un résolveur public — voir docs/troubleshooting.md.
 #   IA_PROJECT_NAME         force le nom utilisé pour scoper les ressources Podman
 #   IA_SELF_MOUNT_RW=1      désactive l'auto-protection en lecture seule de
 #                           ia-dev-containers/ dans /workspace (voir README,
@@ -103,6 +109,7 @@ class Config:
 
         self.gateway_hardened = os.environ.get("GATEWAY_HARDENED", "0") == "1"
         self.gateway_addr_mode = os.environ.get("GATEWAY_ADDR_MODE", "dns")
+        self.gateway_dns_servers = os.environ.get("GATEWAY_DNS_SERVERS", "")
 
         self.gateway_base_image = "ia-dev-containers-gateway-base:latest"
         self.workspace_base_image = "ia-dev-containers-workspace-base:latest"
@@ -464,6 +471,8 @@ def start_gateway(config: Config, gateway_ip: str) -> None:
         user_args += ["--user", "65534:65534"]
         print("🚀 Démarrage du gateway (Phase 1 : non-root direct, sans nftables)...")
 
+    dns_args = ["-e", f"GATEWAY_DNS_SERVERS={config.gateway_dns_servers}"] if config.gateway_dns_servers else []
+
     subprocess.run(
         [
             "podman", "run", "-d", "--name", config.gateway_container,
@@ -474,6 +483,7 @@ def start_gateway(config: Config, gateway_ip: str) -> None:
             f"--network={config.network_name}:ip={gateway_ip},alias=gateway",
             "--network=podman",
             "-e", f"ENABLE_NFT={'1' if config.gateway_hardened else '0'}",
+            *dns_args,
             config.gateway_image,
         ],
         stdout=subprocess.DEVNULL, check=True,
@@ -672,6 +682,8 @@ modifié depuis le dernier build.
 Variables d'environnement utiles (voir le README pour le détail) :
   GATEWAY_HARDENED=1        active nftables + abandon de privilèges sur le gateway
   GATEWAY_ADDR_MODE=static  utilise l'IP fixe du gateway au lieu de la résolution DNS
+  GATEWAY_DNS_SERVERS="ip1 ip2"  résolveurs DNS internes (split-horizon d'entreprise),
+                             au lieu des résolveurs publics par défaut (1.1.1.1 9.9.9.9)
   IA_PROJECT_NAME=<nom>     force le nom utilisé pour scoper les ressources Podman
   IA_PROJECT_ROOT=<chemin>  force la racine du projet sandboxé
   IA_SELF_MOUNT_RW=1        désactive l'auto-protection en lecture seule de ia-dev-containers/"""

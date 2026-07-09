@@ -114,7 +114,7 @@ En plus des vérifications communes (non-root, sudo absent, lecture seule, réso
 
 ```bash
 # Nom de conteneur scopé par projet : copilot-<projet>-gateway (voir `run.sh doctor`)
-podman exec $(podman ps --filter name=copilot- --filter name=-gateway --format '{{.Names}}') /gateway-checks.sh
+podman exec "$(podman ps --format '{{.Names}}' | grep -E '^copilot-.*-gateway$')" /gateway-checks.sh
 ```
 
 ---

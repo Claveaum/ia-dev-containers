@@ -54,6 +54,7 @@ Variables d'environnement :
 |---|---|---|
 | `GATEWAY_HARDENED` | `0` (défaut) / `1` | `1` active nftables + abandon de privilèges sur le gateway |
 | `GATEWAY_ADDR_MODE` | `dns` (défaut) / `static` | `static` utilise l'IP fixe du gateway au lieu de la résolution DNS `gateway` |
+| `GATEWAY_DNS_SERVERS` | `"ip1 ip2"` (défaut : `1.1.1.1 9.9.9.9`) | résolveurs DNS internes d'entreprise, si un domaine de l'allowlist n'existe que dans une zone DNS interne (split-horizon) invisible depuis un résolveur public — voir [docs/troubleshooting.md](../../docs/troubleshooting.md) |
 | `IA_PROJECT_ROOT` | chemin | force la racine du projet (défaut : dossier parent de cette copie) |
 | `IA_PROJECT_NAME` | texte | force le nom utilisé pour scoper les ressources Podman (défaut : nom du dossier `IA_PROJECT_ROOT`) — utile si deux projets partagent le même nom de dossier |
 
@@ -155,7 +156,7 @@ Plus les vérifications habituelles : non-root, sudo absent, résolution DNS ext
 Vérifications côté gateway (utilisateur effectif de Squid, `ip_forward`, capacités) :
 ```bash
 # Nom de conteneur scopé par projet : mistral-vibe-<projet>-gateway (voir `run.sh doctor`)
-podman exec $(podman ps --filter name=mistral-vibe- --filter name=-gateway --format '{{.Names}}') /gateway-checks.sh
+podman exec "$(podman ps --format '{{.Names}}' | grep -E '^mistral-vibe-.*-gateway$')" /gateway-checks.sh
 ```
 
 ---
