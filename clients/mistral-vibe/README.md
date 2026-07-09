@@ -54,7 +54,7 @@ Variables d'environnement :
 |---|---|---|
 | `GATEWAY_HARDENED` | `0` (défaut) / `1` | `1` active nftables + abandon de privilèges sur le gateway |
 | `GATEWAY_ADDR_MODE` | `dns` (défaut) / `static` | `static` utilise l'IP fixe du gateway au lieu de la résolution DNS `gateway` |
-| `GATEWAY_DNS_SERVERS` | `"ip1 ip2"` (défaut : `1.1.1.1 9.9.9.9`) | résolveurs DNS internes d'entreprise, si un domaine de l'allowlist n'existe que dans une zone DNS interne (split-horizon) invisible depuis un résolveur public — voir [docs/troubleshooting.md](../../docs/troubleshooting.md) |
+| `GATEWAY_DNS_SERVERS` | `"ip1 ip2"` (auto-détecté depuis `/etc/resolv.conf` de l'hôte, repli `1.1.1.1 9.9.9.9`) | résolveurs DNS que Squid utilise pour les domaines externes — auto-détection utile en entreprise (zone DNS interne/split-horizon invisible depuis un résolveur public) ; positionner explicitement (vide y compris) pour forcer une valeur — voir [docs/troubleshooting.md](../../docs/troubleshooting.md) |
 | `IA_PROJECT_ROOT` | chemin | force la racine du projet (défaut : dossier parent de cette copie) |
 | `IA_PROJECT_NAME` | texte | force le nom utilisé pour scoper les ressources Podman (défaut : nom du dossier `IA_PROJECT_ROOT`) — utile si deux projets partagent le même nom de dossier |
 

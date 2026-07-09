@@ -32,6 +32,12 @@ def _clean_env(testcase: unittest.TestCase) -> None:
     testcase.addCleanup(patcher.stop)
     for name in ("IA_PROJECT_NAME", "IA_SELF_MOUNT_RW", "GATEWAY_ADDR_MODE", "GATEWAY_HARDENED"):
         os.environ.pop(name, None)
+    # Forcé vide (pas juste popped) : Config lirait sinon le vrai
+    # /etc/resolv.conf de la machine qui exécute les tests (auto-détection,
+    # voir _detect_host_dns_servers()), rendant gateway_dns_servers non
+    # déterministe d'une machine à l'autre. Testé séparément, avec un
+    # /etc/resolv.conf simulé, dans GatewayDnsDetectionTests.
+    os.environ["GATEWAY_DNS_SERVERS"] = ""
 
 
 def _make_config(**overrides) -> orch.Config:
@@ -154,6 +160,75 @@ class RegistryEnvArgsTests(unittest.TestCase):
             orch.registry_runargs_json(config),
             ',\n    "-e=REGISTRY_URL=https://pip.mycorp.com/simple/",\n    "-e=REGISTRY_USER=svc-account"',
         )
+
+
+class GatewayDnsDetectionTests(unittest.TestCase):
+    # _detect_host_dns_servers()/_is_forwardable_dns_ip() : lecture directe
+    # de /etc/resolv.conf simulée via un patch de Path.read_text — pas de
+    # vrai fichier, pour rester hermétique quelle que soit la machine qui
+    # exécute les tests (voir _clean_env : GATEWAY_DNS_SERVERS="" empêche déjà
+    # Config d'appeler ce détecteur dans tous les autres tests). setUp isole
+    # os.environ lui-même (pas via _clean_env, qui forcerait justement
+    # GATEWAY_DNS_SERVERS="" et empêcherait de tester la détection).
+    def setUp(self) -> None:
+        patcher = unittest.mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _patch_resolv_conf(self, content: str) -> None:
+        orig_read_text = Path.read_text
+
+        def patched(path_self, *args, **kwargs):
+            if str(path_self) == "/etc/resolv.conf":
+                return content
+            return orig_read_text(path_self, *args, **kwargs)
+
+        patcher = unittest.mock.patch.object(Path, "read_text", patched)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_filters_loopback_and_link_local(self) -> None:
+        self._patch_resolv_conf(
+            "nameserver 127.0.0.53\nnameserver 172.16.132.12\nnameserver fe80::1\nsearch corp.local\n"
+        )
+        self.assertEqual(orch._detect_host_dns_servers(), ["172.16.132.12"])
+
+    def test_no_usable_entries_returns_empty(self) -> None:
+        self._patch_resolv_conf("nameserver 127.0.0.53\nnameserver ::1\n")
+        self.assertEqual(orch._detect_host_dns_servers(), [])
+
+    def test_missing_resolv_conf_returns_empty(self) -> None:
+        def raise_missing(path_self, *args, **kwargs):
+            raise OSError("no such file")
+
+        patcher = unittest.mock.patch.object(Path, "read_text", raise_missing)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertEqual(orch._detect_host_dns_servers(), [])
+
+    def test_config_appends_public_fallback_to_detected(self) -> None:
+        self._patch_resolv_conf("nameserver 172.16.132.12\n")
+        os.environ.pop("GATEWAY_DNS_SERVERS", None)
+        config = _make_config()
+        self.assertEqual(config.gateway_dns_servers, "172.16.132.12 1.1.1.1 9.9.9.9")
+
+    def test_config_empty_when_nothing_detected(self) -> None:
+        self._patch_resolv_conf("nameserver 127.0.0.53\n")
+        os.environ.pop("GATEWAY_DNS_SERVERS", None)
+        config = _make_config()
+        self.assertEqual(config.gateway_dns_servers, "")
+
+    def test_explicit_env_var_overrides_detection_even_when_empty(self) -> None:
+        self._patch_resolv_conf("nameserver 172.16.132.12\n")
+        os.environ["GATEWAY_DNS_SERVERS"] = ""
+        config = _make_config()
+        self.assertEqual(config.gateway_dns_servers, "")
+
+    def test_explicit_env_var_wins_over_detected_value(self) -> None:
+        self._patch_resolv_conf("nameserver 172.16.132.12\n")
+        os.environ["GATEWAY_DNS_SERVERS"] = "10.0.0.1"
+        config = _make_config()
+        self.assertEqual(config.gateway_dns_servers, "10.0.0.1")
 
 
 class ExtraEnvArgsTests(unittest.TestCase):

@@ -82,12 +82,16 @@ podman exec "$(podman ps --format '{{.Names}}' | grep -E '^<client>-.*-gateway$'
 ```
 Des adresses IP différentes (ou `NXDOMAIN` côté gateway) confirment le split-horizon.
 
-**Résolution** : pointer Squid vers le(s) résolveur(s) DNS interne(s) de l'entreprise via `GATEWAY_DNS_SERVERS` (variable d'environnement générique, lue directement par `scripts/orchestrator.py` — voir le tableau des variables d'environnement dans le README du client) :
+**Résolution** : `scripts/orchestrator.py` détecte automatiquement les résolveurs DNS de l'hôte (`/etc/resolv.conf`, en excluant loopback/link-local) et les passe à Squid via `GATEWAY_DNS_SERVERS` — normalement rien à faire, un simple `./scripts/run.sh down && ./scripts/run.sh up` suffit pour que la détection s'applique (elle n'a d'effet qu'au démarrage du gateway). Vérifiez ce qui a été détecté avec `./scripts/run.sh doctor` (ligne « DNS gateway »).
+
+Si la détection ne trouve rien d'utilisable, positionnez la variable manuellement. Deux cas fréquents où `/etc/resolv.conf` seul ne suffit pas :
+- **macOS** : le VPN installe parfois un résolveur *scopé à un domaine* via `scutil --dns`, invisible dans `/etc/resolv.conf` (qui ne montre que le résolveur par défaut).
+- **Linux avec systemd-resolved** (Fedora, Ubuntu récents...) : `/etc/resolv.conf` pointe vers le stub local `127.0.0.53`, filtré par la détection (loopback) — le vrai résolveur amont est visible via `resolvectl status`, pas dans ce fichier.
 ```bash
 GATEWAY_DNS_SERVERS="<ip-dns-interne> [ip-dns-secondaire]" ./scripts/run.sh down
 GATEWAY_DNS_SERVERS="<ip-dns-interne> [ip-dns-secondaire]" ./scripts/run.sh up
 ```
-Cette variable n'a d'effet qu'au démarrage du gateway (`entrypoint.sh` régénère `dns_nameservers` sous `/tmp/squid.conf`, seul chemin inscriptible du conteneur en lecture seule) — un `down && up` est nécessaire après tout changement.
+(`GATEWAY_DNS_SERVERS=""` explicitement vide force au contraire les résolveurs publics par défaut, en désactivant la détection.)
 
 **Limite** : ce résolveur interne doit lui-même être **joignable depuis la VM `podman machine`** (macOS/Windows) ou l'hôte (Linux natif) — s'il n'est accessible que via un VPN, vérifiez que le VPN route bien le trafic de cette VM (voir [docs/macos.md](macos.md)/[docs/windows.md](windows.md)), pas seulement les interfaces réseau natives de l'hôte.
 

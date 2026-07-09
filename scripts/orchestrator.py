@@ -38,11 +38,15 @@
 #   GATEWAY_HARDENED=1     active la Phase 2 (nftables + abandon de privilèges)
 #   GATEWAY_ADDR_MODE=static  utilise l'IP fixe du gateway au lieu de la résolution DNS
 #   GATEWAY_DNS_SERVERS="ip1 ip2"  résolveurs DNS que Squid utilise pour les
-#                           domaines externes (défaut : 1.1.1.1 9.9.9.9, voir
-#                           gateway-base/config/squid.conf). À renseigner si un
-#                           domaine de l'allowlist n'existe que dans une zone
-#                           DNS interne d'entreprise (split-horizon), invisible
-#                           depuis un résolveur public — voir docs/troubleshooting.md.
+#                           domaines externes. Auto-détecté par défaut depuis
+#                           /etc/resolv.conf de l'hôte (voir
+#                           _detect_host_dns_servers()) — utile en entreprise
+#                           pour une zone DNS interne (split-horizon), invisible
+#                           depuis les résolveurs publics de repli
+#                           (1.1.1.1 9.9.9.9, voir gateway-base/config/squid.conf).
+#                           Positionner explicitement (vide y compris) pour
+#                           forcer une valeur au lieu de la détection — voir
+#                           docs/troubleshooting.md.
 #   IA_PROJECT_NAME         force le nom utilisé pour scoper les ressources Podman
 #   IA_SELF_MOUNT_RW=1      désactive l'auto-protection en lecture seule de
 #                           ia-dev-containers/ dans /workspace (voir README,
@@ -52,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import ipaddress
 import json
 import os
 import platform
@@ -85,6 +90,40 @@ def _volume_suffix(target_path: str) -> str:
     return base
 
 
+# --- Détection des résolveurs DNS de l'hôte (défaut de GATEWAY_DNS_SERVERS) ---
+# orchestrator.py tourne toujours sur l'hôte réel (macOS/Windows compris, voir
+# le module docstring) — jamais dans la VM `podman machine` — donc lire
+# /etc/resolv.conf ici lit bien le résolveur de l'hôte (potentiellement poussé
+# par un VPN d'entreprise), pas celui, isolé, de la VM. C'est justement cet
+# écart (VM avec un résolveur public générique, hôte avec un résolveur
+# d'entreprise voyant des zones DNS internes) qui casse la résolution de
+# domaines internes côté gateway sans ce mécanisme (voir
+# docs/troubleshooting.md, section split-horizon).
+def _detect_host_dns_servers() -> list[str]:
+    try:
+        text = Path("/etc/resolv.conf").read_text()
+    except OSError:
+        return []
+    servers = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "nameserver" and _is_forwardable_dns_ip(parts[1]):
+            servers.append(parts[1])
+    return servers
+
+
+# Exclut loopback/link-local : un résolveur "127.0.0.1" a un sens sur l'hôte
+# (ex. stub local d'un client VPN/MDM, fréquent sur macOS) mais désignerait le
+# conteneur gateway lui-même une fois transmis tel quel — silencieusement
+# injoignable depuis là, pas juste inutile.
+def _is_forwardable_dns_ip(value: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return not (addr.is_loopback or addr.is_link_local)
+
+
 @dataclasses.dataclass
 class Config:
     client_name: str
@@ -109,7 +148,23 @@ class Config:
 
         self.gateway_hardened = os.environ.get("GATEWAY_HARDENED", "0") == "1"
         self.gateway_addr_mode = os.environ.get("GATEWAY_ADDR_MODE", "dns")
-        self.gateway_dns_servers = os.environ.get("GATEWAY_DNS_SERVERS", "")
+
+        env_dns_servers = os.environ.get("GATEWAY_DNS_SERVERS")
+        if env_dns_servers is not None:
+            # Positionnée explicitement (y compris vide, pour forcer les
+            # résolveurs publics par défaut de squid.conf) : priorité absolue
+            # sur la détection, jamais fusionnée avec elle.
+            self.gateway_dns_servers = env_dns_servers
+        else:
+            detected = _detect_host_dns_servers()
+            if detected:
+                fallback = [ip for ip in ("1.1.1.1", "9.9.9.9") if ip not in detected]
+                self.gateway_dns_servers = " ".join(detected + fallback)
+            else:
+                # Rien de détecté (résolv.conf absent/vide/loopback only) :
+                # laisser squid.conf utiliser son propre défaut, comme avant
+                # ce mécanisme — pas de changement de comportement observable.
+                self.gateway_dns_servers = ""
 
         self.gateway_base_image = "ia-dev-containers-gateway-base:latest"
         self.workspace_base_image = "ia-dev-containers-workspace-base:latest"
@@ -604,6 +659,10 @@ def cmd_doctor(config: Config) -> None:
     print(f"Nom sandbox     : {config.project_name}")
     print(f"Réseau          : {config.network_name}")
     print(f"Auto-protection : {self_protect_status(config)}")
+    if config.gateway_dns_servers:
+        print(f"DNS gateway     : {config.gateway_dns_servers} (détecté sur l'hôte ou forcé via GATEWAY_DNS_SERVERS)")
+    else:
+        print("DNS gateway     : défaut de squid.conf (1.1.1.1 9.9.9.9) — rien détecté sur l'hôte")
     if _podman_ok("network", "exists", config.network_name):
         print(f"  subnet (existant) : {_podman_network_subnet(config.network_name)}")
     else:
@@ -682,8 +741,10 @@ modifié depuis le dernier build.
 Variables d'environnement utiles (voir le README pour le détail) :
   GATEWAY_HARDENED=1        active nftables + abandon de privilèges sur le gateway
   GATEWAY_ADDR_MODE=static  utilise l'IP fixe du gateway au lieu de la résolution DNS
-  GATEWAY_DNS_SERVERS="ip1 ip2"  résolveurs DNS internes (split-horizon d'entreprise),
-                             au lieu des résolveurs publics par défaut (1.1.1.1 9.9.9.9)
+  GATEWAY_DNS_SERVERS="ip1 ip2"  résolveurs DNS pour Squid, auto-détectés par
+                             défaut depuis /etc/resolv.conf de l'hôte (utile en
+                             entreprise, DNS interne/split-horizon) ; positionner
+                             explicitement (vide y compris) pour forcer une valeur
   IA_PROJECT_NAME=<nom>     force le nom utilisé pour scoper les ressources Podman
   IA_PROJECT_ROOT=<chemin>  force la racine du projet sandboxé
   IA_SELF_MOUNT_RW=1        désactive l'auto-protection en lecture seule de ia-dev-containers/"""
