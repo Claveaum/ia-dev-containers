@@ -19,8 +19,10 @@ configurer pour **remplacer** ce registre public par défaut.
    ligne prévue dans le tableau `SECRETS` du même fichier, puis créez le
    secret Podman :
    ```bash
+   # pip (mistral-vibe) : le jeton/mot de passe brut
    printf '%s' 'votre-jeton' | podman secret create mistral-vibe-registry-token -
-   # ou : printf '%s' 'votre-jeton' | podman secret create copilot-registry-token -
+   # npm (copilot) : le blob Basic auth déjà encodé (voir plus bas pourquoi)
+   printf '%s' 'utilisateur:motdepasse' | base64 -w0 | podman secret create copilot-registry-token -
    ```
    `./scripts/run.sh secrets` confirme que `REGISTRY_TOKEN` est bien défini.
    Repli possible sur `.env` (`REGISTRY_TOKEN=...`) comme pour les autres
@@ -49,8 +51,18 @@ chaque gestionnaire de paquets :
 - **pip** (`mistral-vibe`) : écrit `~/.local/pip.conf` (`index-url`) et
   `~/.local/.netrc` (`machine <host> / login <user> / password <jeton>`).
 - **npm** (`copilot`) : écrit `~/.npm-global/.npmrc` avec `registry=...` et
-  `//<host>/:_authToken=${REGISTRY_TOKEN}` (jeton interpolé par npm
-  lui-même depuis l'environnement — il ne touche jamais le disque).
+  `//<host>/:_auth=${REGISTRY_TOKEN}` — Basic auth, pas Bearer
+  (`_authToken`) : beaucoup de registres npm d'entreprise (Nexus en
+  particulier) rejettent `Authorization: Bearer <jeton>` et renvoient 404
+  (pas 401) sur une auth mal formée, ce qui ressemble à tort à un paquet
+  manquant plutôt qu'à un échec d'authentification. `REGISTRY_TOKEN` est
+  donc attendu **déjà encodé** — le blob Basic complet
+  (`base64(utilisateur:motdepasse)`), pas le mot de passe brut : voir la
+  commande de création du secret à l'étape 2. `REGISTRY_USER` n'est pas
+  utilisé pour npm (l'identifiant est déjà dans le blob). Comme pour
+  `_authToken` avant, le jeton est écrit en tant que référence littérale
+  `${REGISTRY_TOKEN}` : npm l'interpole lui-même depuis l'environnement à la
+  lecture de `.npmrc`, il ne touche donc jamais le disque.
 
 Ces fichiers vivent sous `PKG_VOLUME_TARGET`, pas sous `$HOME` : le
 conteneur workspace tourne `--read-only`, seuls `PKG_VOLUME_TARGET`,

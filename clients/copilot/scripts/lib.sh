@@ -78,8 +78,10 @@ SECRETS=(
     "copilot-gh-token:GH_TOKEN"
 
     # Registre npm d'entreprise (optionnel) : décommenter si REGISTRY_URL
-    # ci-dessous est défini. Création :
-    # printf '%s' 'token...' | podman secret create copilot-registry-token -
+    # ci-dessous est défini. npm attend du Basic auth (`_auth`), pas Bearer
+    # (`_authToken`) — voir client_configure_registry() plus bas. La valeur
+    # du secret est donc déjà le blob Basic encodé, pas le mot de passe brut :
+    # printf '%s' 'utilisateur:motdepasse' | base64 -w0 | podman secret create copilot-registry-token -
     # "copilot-registry-token:REGISTRY_TOKEN"
 )
 
@@ -91,10 +93,11 @@ SECRETS=(
 # Le jeton associé est un secret (voir REGISTRY_TOKEN dans SECRETS
 # ci-dessus), jamais cette variable. Détail : docs/enterprise-registry.md.
 REGISTRY_URL=""
-# Non utilisé par npm (authentification par jeton seul, voir
-# client_configure_registry() ci-dessous) — présent uniquement pour la
-# symétrie avec les autres clients (ex. mistral-vibe/pip, où un identifiant a
-# un sens pour netrc).
+# Non utilisé par npm : l'identifiant est déjà encodé dans le blob Basic
+# auth attendu par REGISTRY_TOKEN (voir SECRETS et
+# client_configure_registry() ci-dessous). Présent uniquement pour la
+# symétrie avec les autres clients (ex. mistral-vibe/pip, où un identifiant
+# a un sens séparément pour netrc).
 REGISTRY_USER=""
 
 # Chemin déterministe du fichier écrit par client_configure_registry()
@@ -119,9 +122,16 @@ fi
 # injecté en variable d'environnement par scripts/orchestrator.py, depuis
 # SECRETS ci-dessus). $HOME lui-même est en lecture seule (--read-only) :
 # tout fichier généré doit vivre sous PKG_VOLUME_TARGET (~/.npm-global), seul
-# chemin inscriptible ici. Le jeton est écrit en tant que référence
-# littérale ${REGISTRY_TOKEN} : npm l'interpole lui-même depuis
-# l'environnement à la lecture de .npmrc, il ne touche donc jamais le disque.
+# chemin inscriptible ici. Basic auth (`_auth`), pas Bearer (`_authToken` :
+# npm envoie alors `Authorization: Bearer <jeton>`, rejeté par des registres
+# comme Nexus — repéré en pratique sur un Nexus renvoyant 404 au lieu de 401
+# sur une auth mal formée, masquant l'échec d'auth en apparence de paquet
+# manquant). REGISTRY_TOKEN est donc attendu déjà sous la forme du blob
+# Basic (base64(user:mot de passe), voir SECRETS ci-dessus), pas le mot de
+# passe brut : ce callback n'a rien à calculer, et le jeton est écrit en
+# tant que référence littérale ${REGISTRY_TOKEN} — npm l'interpole
+# lui-même depuis l'environnement à la lecture de .npmrc, il ne touche donc
+# jamais le disque.
 client_configure_registry() {
     : "${REGISTRY_TOKEN:?REGISTRY_URL défini mais REGISTRY_TOKEN absent (voir SECRETS ci-dessus)}"
     local registry_key="${REGISTRY_URL#*://}"
@@ -129,7 +139,7 @@ client_configure_registry() {
 
     {
         printf 'registry=%s\n' "$REGISTRY_URL"
-        printf '//%s/:_authToken=${REGISTRY_TOKEN}\n' "$registry_key"
+        printf '//%s/:_auth=${REGISTRY_TOKEN}\n' "$registry_key"
     } > "${REGISTRY_NPMRC}"
     chmod 600 "${REGISTRY_NPMRC}"
 }
